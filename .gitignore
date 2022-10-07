@@ -12,3 +12,5 @@
 packages/
 *UpgradeLog.htm
 *.DS_Store
+.vscode/launch.json
+.vscode/tasks.json

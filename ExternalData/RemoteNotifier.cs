@@ -18,6 +18,7 @@ namespace ExternalData
         private EventManager eventManager;
 
         public string URL { get; private set; }
+        private RaceLib.Race lastRace;
         private JSONDataAccessor JSONDataAccessor;
 
         private SerialPort serialPort;
@@ -71,8 +72,9 @@ namespace ExternalData
         private void OnPilotsChanged(RaceLib.PilotChannel pilot)
         {
             RaceLib.Race race = eventManager.RaceManager.CurrentRace;
-            if (race != null)
+            if (race != null && race != lastRace)
             {
+                lastRace = race;
                 PilotState[] pilotRaceStates = GetPilotRaceStates(race).ToArray();
                 PutObject(new PilotRaceState(race, pilotRaceStates, URL));
             }

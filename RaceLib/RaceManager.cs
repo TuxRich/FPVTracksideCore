@@ -1,4 +1,4 @@
-﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -1719,18 +1719,23 @@ namespace RaceLib
                         int roundNumber = 1;
                         foreach (Round round in roundTypeGroup)
                         {
-                            round.RoundNumber = roundNumber;
-                            db.Update(round);
+                            if (round.RoundNumber != roundNumber)
+                            {
+                                round.RoundNumber = roundNumber;
+                                db.Update(round);
+                            }
 
                             int raceNumber = 1;
 
                             IEnumerable<Race> races = GetRaces(round).OrderBy(r => r.RaceNumber).ThenBy(r => r.Creation);
                             foreach (Race race in races)
                             {
-                                race.RaceNumber = raceNumber;
+                                if (race.RaceNumber != raceNumber)
+                                {
+                                    race.RaceNumber = raceNumber;
+                                    db.Update(race);
+                                }
                                 raceNumber++;
-
-                                db.Update(race);
                             }
                             roundNumber++;
                         }

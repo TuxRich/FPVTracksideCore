@@ -1,4 +1,4 @@
-﻿using Composition;
+using Composition;
 using Composition.Layers;
 using Composition.Nodes;
 using ImageServer;
@@ -49,8 +49,9 @@ namespace FPVTracksideCore
 
         protected override void LoadContent()
         {
+            FfmpegMediaPlatform.FfmpegGlobalInitializer.Initialize();
 
-            DirectoryInfo eventDir = new DirectoryInfo(ApplicationProfileSettings.Instance.EventStorageLocation);
+            DirectoryInfo eventDir = new DirectoryInfo(ApplicationProfileSettings.Instance.GetResolvedEventStorageLocation());
             DatabaseFactory.Init(new DB.DatabaseFactory(Data, eventDir));
 
             Theme.Initialise(GraphicsDevice, PlatformTools.WorkingDirectory, "FPVTrackside");
@@ -63,6 +64,8 @@ namespace FPVTracksideCore
             }
 
             base.LoadContent();
+
+            VideoFrameWorks.Available.Add(new FfmpegMediaPlatform.FfmpegMediaFramework());
         }
 
     }

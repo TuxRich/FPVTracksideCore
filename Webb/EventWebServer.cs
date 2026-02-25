@@ -1,4 +1,4 @@
-﻿using DB;
+using DB;
 using DB.JSON;
 using Newtonsoft.Json;
 using RaceLib;
@@ -178,17 +178,10 @@ namespace Webb
                 string[] parameters = requestPath.Skip(1).ToArray();
 
                 string content = "";
-                // Get the event storage location (passed in constructor or fall back to working directory)
                 string eventsPath = eventStorageLocation;
                 if (string.IsNullOrEmpty(eventsPath))
                 {
-                    // Fallback: use working directory + events
                     eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", "events");
-                }
-                else if (!Path.IsPathRooted(eventsPath))
-                {
-                    // Make relative paths absolute
-                    eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", eventsPath);
                 }
                 DirectoryInfo eventRoot = new DirectoryInfo(Path.Combine(eventsPath, eventManager.Event.ID.ToString()));
                 switch (action)

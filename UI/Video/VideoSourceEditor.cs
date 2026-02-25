@@ -1,4 +1,4 @@
-﻿using Composition;
+using Composition;
 using Composition.Input;
 using Composition.Layers;
 using Composition.Nodes;
@@ -40,7 +40,7 @@ namespace UI.Video
 
         public static VideoSourceEditor GetVideoSourceEditor(EventManager em, Profile profile)
         {
-            VideoManager videoManager = new VideoManager(ApplicationProfileSettings.Instance.EventStorageLocation, profile);
+            VideoManager videoManager = new VideoManager(ApplicationProfileSettings.Instance.GetResolvedEventStorageLocation(), profile);
 
             videoManager.LoadDevices();
             videoManager.MaintainConnections = true;

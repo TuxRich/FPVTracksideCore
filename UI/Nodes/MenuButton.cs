@@ -580,27 +580,10 @@ namespace UI.Nodes
         {
             string path;
 
-            // Special handling for "events" paths - use the same logic as HTTP service
             if (paths.Any() && paths[0] == "events")
             {
-                string eventsPath = ApplicationProfileSettings.Instance.EventStorageLocation;
+                string eventsPath = ApplicationProfileSettings.Instance.GetResolvedEventStorageLocation();
 
-                // Trim off some legacy slashes.
-                if (eventsPath.EndsWith("/") || eventsPath.EndsWith("\\"))
-                {
-                    eventsPath = eventsPath.Substring(0, eventsPath.Length - 1);
-                }
-
-                if (string.IsNullOrEmpty(eventsPath))
-                {
-                    eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", "events");
-                }
-                else if (!Path.IsPathRooted(eventsPath))
-                {
-                    eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", eventsPath);
-                }
-
-                // Append any additional path components after "events"
                 if (paths.Length > 1)
                 {
                     path = Path.Combine(eventsPath, Path.Combine(paths.Skip(1).ToArray()));

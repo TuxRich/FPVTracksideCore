@@ -1,4 +1,4 @@
-﻿using Composition;
+using Composition;
 using Composition.Text;
 using Microsoft.Xna.Framework;
 using UI;
@@ -37,7 +37,7 @@ namespace FPVMacsideCore
             FfmpegMediaPlatform.FfmpegGlobalInitializer.Initialize();
 
             Theme.Initialise(GraphicsDevice, PlatformTools.WorkingDirectory, "Dark");
-            DirectoryInfo eventDir = new DirectoryInfo(ApplicationProfileSettings.Instance.EventStorageLocation);
+            DirectoryInfo eventDir = new DirectoryInfo(ApplicationProfileSettings.Instance.GetResolvedEventStorageLocation());
             DatabaseFactory.Init(new DB.DatabaseFactory(Data, eventDir));
 
 

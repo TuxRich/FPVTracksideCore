@@ -1,8 +1,9 @@
-﻿using Composition.Input;
+using Composition.Input;
 using Composition.Nodes;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -361,6 +362,26 @@ namespace UI
             ShowDownPilotLapTimes = true;
             PilotProfileMask = true;
             PilotProfileMaskAlpha = 0.6f;
+        }
+
+        public string GetResolvedEventStorageLocation()
+        {
+            string eventsPath = EventStorageLocation;
+            if (string.IsNullOrEmpty(eventsPath))
+            {
+                eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", "events");
+            }
+            else if (!Path.IsPathRooted(eventsPath))
+            {
+                eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", eventsPath);
+            }
+
+            if (eventsPath.EndsWith("/") || eventsPath.EndsWith("\\"))
+            {
+                eventsPath = eventsPath.Substring(0, eventsPath.Length - 1);
+            }
+
+            return eventsPath;
         }
 
         protected const string filename = "ProfileSettings.xml";

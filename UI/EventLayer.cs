@@ -1,4 +1,4 @@
-﻿using Composition.Input;
+using Composition.Input;
 using Composition.Layers;
 using Composition.Nodes;
 using ExternalData;
@@ -98,7 +98,7 @@ namespace UI
                 Logger.UI.LogException(this, ex);
             }
 
-            DirectoryInfo eventDirectory = new DirectoryInfo(Path.Combine(ApplicationProfileSettings.Instance.EventStorageLocation, eventManager.Event.ID.ToString()));
+            DirectoryInfo eventDirectory = new DirectoryInfo(Path.Combine(ApplicationProfileSettings.Instance.GetResolvedEventStorageLocation(), eventManager.Event.ID.ToString()));
 
             workQueueStartStopRace = new WorkQueue("Event Layer - Start Stop Race");
 
@@ -270,7 +270,7 @@ namespace UI
                 raceControl = this;
             }
 
-            eventWebServer = new EventWebServer(EventManager, SoundManager, raceControl, Theme.Current.ChannelColors, ApplicationProfileSettings.Instance.EventStorageLocation);
+            eventWebServer = new EventWebServer(EventManager, SoundManager, raceControl, Theme.Current.ChannelColors, ApplicationProfileSettings.Instance.GetResolvedEventStorageLocation());
 
             if (ApplicationProfileSettings.Instance.HTTPServer)
             {

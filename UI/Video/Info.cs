@@ -1,4 +1,4 @@
-﻿using ImageServer;
+using ImageServer;
 using RaceLib;
 using System;
 using System.Collections.Generic;
@@ -55,7 +55,8 @@ namespace UI.Video
 
         public RecodingInfo(ICaptureFrameSource captureFrameSource)
         {
-            FilePath = Path.GetRelativePath(Directory.GetCurrentDirectory(), captureFrameSource.Filename);
+            string basePath = IOTools.WorkingDirectory?.FullName ?? Directory.GetCurrentDirectory();
+            FilePath = Path.GetRelativePath(basePath, captureFrameSource.Filename);
             ChannelCoveragePercent = captureFrameSource.VideoConfig.ChannelCoveragePercent;
             FrameTimes = captureFrameSource.FrameTimes.ToArray();
             ChannelBounds = captureFrameSource.VideoConfig.VideoBounds;

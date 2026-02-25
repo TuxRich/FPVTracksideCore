@@ -45,6 +45,7 @@
     <ProjectReference Include="..\Compositor\Composition.csproj" />
     <ProjectReference Include="..\Tools\Tools.csproj" />
     <ProjectReference Include="..\WindowsPlatform\WindowsPlatform.csproj" />
+    <ProjectReference Include="..\ffmpegMediaPlatform\FfmpegMediaPlatform.csproj" />
   </ItemGroup>
 
 

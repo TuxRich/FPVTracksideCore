@@ -1,4 +1,4 @@
-﻿using RaceLib.Format;
+using RaceLib.Format;
 using RaceLib.Game;
 using System;
 using System.Collections.Generic;
@@ -708,7 +708,7 @@ namespace RaceLib
                 Round[] rounds = GetStageRounds(stage).ToArray();
                 foreach (Round r in rounds)
                 {
-                    Race[] races = RaceManager.GetRaces(r);
+                    Race[] races = RaceManager.GetRaces(r).ToArray();
                     IEnumerable<Race> finished = races.Where(g => g.Ended);
                     IEnumerable<Race> notFinished = races.Where(g => !g.Ended);
                     

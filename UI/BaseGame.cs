@@ -1,4 +1,4 @@
-﻿using Composition;
+using Composition;
 using Composition.Input;
 using Composition.Layers;
 using Composition.Nodes;
@@ -352,19 +352,12 @@ namespace UI
             // Load races BEFORE sync. Sync systems need to assume this..
             eventManager.LoadRaces(startEventWorkSet, loadingLayer.WorkQueue);
 
-            loadingLayer.WorkQueue.Enqueue(startEventWorkSet, "On Start Event", () =>
+            loadingLayer.WorkQueue.Enqueue(startEventWorkSet, "Initializing Settings", () =>
             {
                 OnStartEvent(eventManager, eventManager.Event);
-            });
 
-            loadingLayer.WorkQueue.Enqueue(startEventWorkSet, "Loading Settings", () =>
-            {
-                // Re-init the following settings so settings windows can reload event to reload settings.
                 ApplicationProfileSettings.Initialize(Profile);
-            });
 
-            loadingLayer.WorkQueue.Enqueue(startEventWorkSet, "Loading Theme", () =>
-            {
                 Theme.Initialise(GraphicsDevice, PlatformTools.WorkingDirectory, "FPVTrackside");
 
                 if (backgroundLayer != null)

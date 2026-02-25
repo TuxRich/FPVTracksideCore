@@ -1,4 +1,4 @@
-﻿using Composition;
+using Composition;
 using Composition.Input;
 using Composition.Layers;
 using Composition.Nodes;
@@ -467,7 +467,7 @@ namespace UI.Nodes.Rounds
             var timing = EventManager.RaceManager.TimingSystemManager.PrimeSystems.OfType<Timing.DummyTimingSystem>().FirstOrDefault();
             foreach (Race race in EventManager.RaceManager.GetRaces(Round))
             {
-                EventManager.RaceManager.GenerateResults(timing, race, true);
+                EventManager.RaceManager.GenerateResults(timing, race);
             }
             Refresh();
         }

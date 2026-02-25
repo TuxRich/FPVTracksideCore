@@ -41,6 +41,7 @@ namespace RaceLib
         public event Action<Race> OnRaceTimesUp;
 
         public event Race.OnRaceEvent OnRaceRemoved;
+        public event Race.OnRaceEvent OnRacePilotsSet;
 
         public event PilotChannelDelegate OnPilotAdded;
         public event PilotChannelDelegate OnPilotRemoved;
@@ -1037,19 +1038,19 @@ namespace RaceLib
                             race.TargetLaps = EventManager.Event.Laps;
                         }
 
+                        Dictionary<Guid, Detection> detectionLookup = new Dictionary<Guid, Detection>();
+                        foreach (Detection det in race.Detections)
+                        {
+                            detectionLookup[det.ID] = det;
+                        }
+
                         foreach (Lap lap in race.Laps)
                         {
-                            // When loading, we need to set the race object reference onto each Lap for performance quick access reasons.
                             lap.Race = race;
 
-                            // Same with detections...
-                            if (lap.Detection != null)
+                            if (lap.Detection != null && detectionLookup.TryGetValue(lap.Detection.ID, out Detection d))
                             {
-                                Detection d = race.Detections.FirstOrDefault(da => da.ID == lap.Detection.ID);
-                                if (d != null)
-                                {
-                                    lap.Detection = d;
-                                }
+                                lap.Detection = d;
                             }
                         }
                     }
@@ -1610,7 +1611,21 @@ namespace RaceLib
                                                   && r.RoundNumber >= start.RoundNumber
                                                   && r.RoundNumber <= end.RoundNumber
                                                   && r.Round.EventType == end.EventType
-                                                  && r.Round.RoundType == end.RoundType);
+                                                  && r.Round.StageType == end.StageType);
+        }
+
+        public Race[] GetRaces(IEnumerable<Round> rounds)
+        {
+            lock (races)
+            {
+                return races.Where(r => r.Valid && r.Round != null && rounds.Contains(r.Round)).ToArray();
+            }
+        }
+
+        public Race[] GetRaces(Stage stage)
+        {
+            IEnumerable<Round> stageRounds = EventManager.RoundManager.GetStageRounds(stage);
+            return GetRaces(stageRounds);
         }
 
         public IEnumerable<Race> GetRacesCopyIncludingInvalid()
@@ -2187,6 +2202,26 @@ namespace RaceLib
                 return false;
             }
         }
+        public void SetRacePilots(Race race, IEnumerable<Tuple<Pilot, Channel>> pilotChannels, bool optimiseChannels)
+        {
+            using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+            {
+                foreach (var tuple in pilotChannels)
+                {
+                    Pilot pilot = tuple.Item1;
+                    Channel channel = tuple.Item2;
+                    race.SetPilot(db, channel, pilot);
+                }
+
+                if (optimiseChannels)
+                {
+                    OptimiseChannels(db, race);
+                }
+            }
+
+            OnRacePilotsSet?.Invoke(race);
+        }
+
         public PilotChannel RemovePilot(Race race, Pilot pilot, bool force = false)
         {
             using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))

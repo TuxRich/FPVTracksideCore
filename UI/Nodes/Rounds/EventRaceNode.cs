@@ -1,4 +1,4 @@
-﻿using Composition;
+using Composition;
 using Composition.Input;
 using Composition.Layers;
 using Composition.Nodes;
@@ -384,7 +384,7 @@ namespace UI.Nodes.Rounds
                     mm.AddBlank();
                     mm.AddItem("Generate Dummy Race Results", () =>
                     {
-                        EventManager.RaceManager.GenerateResults(EventManager.RaceManager.TimingSystemManager.PrimeSystems.OfType<Timing.DummyTimingSystem>().FirstOrDefault(), Race, true);
+                        EventManager.RaceManager.GenerateResults(EventManager.RaceManager.TimingSystemManager.PrimeSystems.OfType<Timing.DummyTimingSystem>().FirstOrDefault(), Race);
                         Refresh();
                     });
 

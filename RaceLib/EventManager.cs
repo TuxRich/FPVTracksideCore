@@ -1,4 +1,4 @@
-﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework;
 using RaceLib.Format;
 using RaceLib.Game;
 using System;
@@ -270,10 +270,18 @@ namespace RaceLib
                 {
                     Event = db.LoadEvent();
 
+                    System.Diagnostics.Debug.Assert(Event != null);
+
+                    foreach (Pilot pilot in Event.Pilots)
+                    {
+                        if (pilot != null)
+                        {
+                            pilot.Name = Tools.Ext.NoControlCharacters(pilot.Name);
+                        }
+                    }
+
                     Event.LastOpened = DateTime.Now;
                     db.Update(Event);
-
-                    System.Diagnostics.Debug.Assert(Event != null);
 
                     UpdateRoundOrder(db);
                     CleanUpStages();
@@ -288,43 +296,16 @@ namespace RaceLib
                     Channel.LoadDisplayNames(Event);
                 }
 
-            });
-
-            workQueue.Enqueue(workSet, "Checking Pilot Names", () =>
-            {
-                foreach (Pilot pilot in Event.Pilots)
-                {
-                    if (pilot != null)
-                    {
-                        pilot.Name = Tools.Ext.NoControlCharacters(pilot.Name);
-                    }
-                }
-            });
-
-            workQueue.Enqueue(workSet, "Loading Game Types", () =>
-            {
                 GameManager.LoadGameTypes(Profile);
-                
                 GameType gameType = GameManager.GetByName(Event.GameTypeName);
                 GameManager.SetGameType(gameType);
+
+                LoadTrack(Event.Track);
             });
 
             workQueue.Enqueue(workSet, "Finding Profile Pictures", () =>
             {
                 ProfilePictures.FindProfilePictures(Event.Pilots.ToArray());
-            });
-
-            workQueue.Enqueue(workSet, "Updating event object", () =>
-            {
-                using (IDatabase db = DatabaseFactory.Open(EventId))
-                {
-                    db.Update(Event);
-                }
-            });
-
-            workQueue.Enqueue(workSet, "Loading Track", () =>
-            {
-                LoadTrack(Event.Track);
             });
         }
 
@@ -370,24 +351,10 @@ namespace RaceLib
         {
             workQueue.Enqueue(workSet, "Unloading Races", () =>
             {
-                //Load any existing races
                 RaceManager.Clear();
-            });
-
-            workQueue.Enqueue(workSet, "Unloading Results", () =>
-            {
-                // Load points
                 ResultManager.Clear();
-            });
-
-            workQueue.Enqueue(workSet, "Unloading Records", () =>
-            {
                 LapRecordManager.Clear();
                 SpeedRecordManager.Clear();
-            });
-
-            workQueue.Enqueue(workSet, "Loading Sheets", () =>
-            {
                 RoundManager.SheetFormatManager.Clear();
             });
         }
@@ -396,26 +363,15 @@ namespace RaceLib
         {
             workQueue.Enqueue(workSet, "Loading Races", () =>
             {
-                //Load any existing races
                 RaceManager.LoadRaces(Event);
             });
 
-            workQueue.Enqueue(workSet, "RoundRepair", RoundRepair);
-
             workQueue.Enqueue(workSet, "Loading Results", () =>
             {
-                // Load points
+                RoundRepair();
                 ResultManager.Load(Event);
-            });
-
-            workQueue.Enqueue(workSet, "Updating Records", () =>
-            {
                 LapRecordManager.UpdatePilots(Event.PilotChannels.Select(pc => pc.Pilot));
                 SpeedRecordManager.Initialize();
-            });
-
-            workQueue.Enqueue(workSet, "Loading Sheets", () =>
-            {
                 RoundManager.SheetFormatManager.Load();
             });
         }

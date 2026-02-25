@@ -1,4 +1,4 @@
-﻿using Composition;
+using Composition;
 using Composition.Input;
 using Composition.Layers;
 using Composition.Nodes;
@@ -326,6 +326,22 @@ namespace UI.Nodes
                     RebuildList();
                 });
 
+
+                mm.AddItemConfirm("Remove Pilots not in a Race", () =>
+                {
+                    HashSet<Pilot> pilotsInRaces = new HashSet<Pilot>(
+                        eventManager.RaceManager.Races.SelectMany(r => r.Pilots));
+
+                    Pilot[] toRemove = eventManager.Event.Pilots
+                        .Where(p => !pilotsInRaces.Contains(p))
+                        .ToArray();
+
+                    foreach (Pilot p in toRemove)
+                    {
+                        eventManager.RemovePilot(p);
+                    }
+                    RebuildList();
+                });
 
                 mm.AddItemConfirm("Remove All Pilots", () =>
                 {

@@ -22,6 +22,10 @@ namespace UI
             PositionAndPB,
             Channel
         }
+        
+        [Category("General")]
+        [NeedsRestart]
+        public string Language { get; set; }
 
         [Category("General")]
         [DisplayName("Show Welcome Screen")]
@@ -129,6 +133,8 @@ namespace UI
         [Category("Layout")]
         public bool AlwaysSmallPilotProfile { get; set; }
 
+        [Category("Layout")]
+        public bool ShowDownPilotLapTimes { get; set; }
 
         [Category("Dynamic pilot ordering")]
         public OrderTypes PilotOrderPreRace { get; set; }
@@ -263,8 +269,13 @@ namespace UI
         [NeedsRestart]
         public int PilotProfileHoldLengthSeconds { get; set; }
 
-        [Browsable(false)]
-        public string Language { get; set; }
+        [Category("Pilot Profile")]
+        [NeedsRestart]
+        public bool PilotProfileMask { get; set; }
+
+        [Category("Pilot Profile")]
+        [NeedsRestart]
+        public float PilotProfileMaskAlpha { get; set; }
 
         public ApplicationProfileSettings()
         {
@@ -335,7 +346,7 @@ namespace UI
             VideosToKeep = 50;
             HTTPServer = false;
 
-            EventStorageLocation = @"events/";
+            EventStorageLocation = @"events";
 
             VideoStaticDetector = true;
             CrashThreshold = 4;
@@ -347,6 +358,9 @@ namespace UI
             UseDirectX9 = false;
             ShowPositionDeltaTime = 6;
             Language = "English";
+            ShowDownPilotLapTimes = true;
+            PilotProfileMask = true;
+            PilotProfileMaskAlpha = 0.6f;
         }
 
         protected const string filename = "ProfileSettings.xml";

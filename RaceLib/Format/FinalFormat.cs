@@ -11,14 +11,14 @@ namespace RaceLib.Format
     {
         public ResultManager PointsManager { get { return EventManager.ResultManager; } }
 
-        public FinalFormat(EventManager eventManager)
-            :base(eventManager)
+        public FinalFormat(EventManager em, Stage stage = null)
+           : base(em, stage)
         {
         }
 
         public override IEnumerable<Race> GenerateRound(IDatabase db, IEnumerable<Race> preExisting, Round newRound, RoundPlan plan)
         {
-            newRound.RoundType = Round.RoundTypes.Final;
+            newRound.Stage.StageType = StageTypes.Final;
             db.Upsert(newRound);
 
             List<Race> races = new List<Race>();

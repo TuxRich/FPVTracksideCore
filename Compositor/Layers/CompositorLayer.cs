@@ -56,12 +56,14 @@ namespace Composition.Layers
                 return LayerStack.PlatformTools;
             }
         }
+        public TextureCache TextureCache { get { if (drawer == null) return null; return drawer.TextureCache; } }
+
 
         public CompositorLayer(GraphicsDevice device)
         {
             updateables = new List<IUpdateableNode>();
 
-            drawer = new Drawer(device);
+            drawer = new Drawer(device, new TextureCache(device, true));
             GraphicsDevice = device;
 
             needsRedraw = true;
@@ -201,13 +203,23 @@ namespace Composition.Layers
             return base.OnTextInput(inputEvent);
         }
 
-        public bool DragEndEvent(MouseInputEvent finalInputEvent, Node node)
+        public bool OnDrop(MouseInputEvent finalInputEvent, Node node)
         {
             if (Root.OnDrop(finalInputEvent, node))
             {
                 return true;
             }
             return false;
+        }
+
+        public Rectangle? CanDrop(MouseInputEvent finalInputEvent, Node node)
+        {
+            Rectangle? o = Root.CanDrop(finalInputEvent, node);
+            if (o != null)
+            {
+                return o;
+            }
+            return null;
         }
 
         public void Register(Node node)

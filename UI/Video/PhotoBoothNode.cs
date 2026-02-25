@@ -51,7 +51,7 @@ namespace UI.Video
             this.eventManager = eventManager;
             this.soundManager = soundManager;
 
-            PilotsDirectory = new DirectoryInfo("pilots/");
+            PilotsDirectory = new DirectoryInfo("pilots");
             Timeout = TimeSpan.FromSeconds(10);
         }
 
@@ -138,14 +138,15 @@ namespace UI.Video
             soundManager.PlaySound(SoundKey.PhotoboothTrigger);
 
             string filenameSafe = Maths.SafeFileNameFromString(Pilot.Name + "_temp.png");
-            
+
             string newPath = Path.Combine(PilotsDirectory.FullName, filenameSafe);
             newPath = Path.GetRelativePath(Directory.GetCurrentDirectory(), newPath);
             camNode.FrameNode.SaveImage(newPath);
 
             if (File.Exists(newPath))
             {
-                ConfirmPictureNode confirmPictureNode = new ConfirmPictureNode(eventManager.EventId, Pilot, Pilot.PhotoPath, newPath);
+                // Photo is already saved with flip/mirror baked in
+                ConfirmPictureNode confirmPictureNode = new ConfirmPictureNode(eventManager.EventId, Pilot, Pilot.PhotoPath, newPath, false, false);
                 confirmPictureNode.OnUseNew += ConfirmPictureNode_OnUseNew;
                 GetLayer<PopupLayer>().Popup(confirmPictureNode);
             }
@@ -187,7 +188,14 @@ namespace UI.Video
 
             if (File.Exists(filename))
             {
-                ConfirmPictureNode confirmPictureNode = new ConfirmPictureNode(eventManager.EventId, Pilot, Pilot.PhotoPath, filename);
+                // Video is recorded raw, so store the source's flip/mirror state for playback
+                FrameSource source = camNode.FrameNode.Source;
+                bool flipped = source.Direction == FrameSource.Directions.TopDown;
+                if (source.VideoConfig.Flipped)
+                    flipped = !flipped;
+                bool mirrored = source.VideoConfig.Mirrored;
+
+                ConfirmPictureNode confirmPictureNode = new ConfirmPictureNode(eventManager.EventId, Pilot, Pilot.PhotoPath, filename, flipped, mirrored);
                 confirmPictureNode.OnUseNew += ConfirmPictureNode_OnUseNew;
                 GetLayer<PopupLayer>().Popup(confirmPictureNode);
             }
@@ -266,6 +274,15 @@ namespace UI.Video
             cameraAspectNode = null;
             camNode = null;
             pilotNameNode = null;
+        }
+
+        public override Rectangle? CanDrop(MouseInputEvent finalInputEvent, Node node)
+        {
+            IPilot pl = node as IPilot;
+            if (pl != null)
+                return Bounds;
+
+            return base.CanDrop(finalInputEvent, node);
         }
 
         public override bool OnDrop(MouseInputEvent finalInputEvent, Node node)
@@ -396,12 +413,28 @@ namespace UI.Video
         private Pilot pilot;
         private Guid eventId;
 
+        private bool videoFlipped;
+        private bool videoMirrored;
+
+        private bool previousVideoFlipped;
+        private bool previousVideoMirrored;
+
         public event Action<Pilot> OnUseNew;
 
-        public ConfirmPictureNode(Guid eventId, Pilot pilot, string existingFilename, string newFilename)
+        public ConfirmPictureNode(Guid eventId, Pilot pilot, string existingFilename, string newFilename, bool videoFlipped, bool videoMirrored)
         {
             this.eventId = eventId;
-            this.pilot = pilot; 
+            this.pilot = pilot;
+            this.videoFlipped = videoFlipped;
+            this.videoMirrored = videoMirrored;
+
+            // Save previous values so we can restore on KeepOld
+            previousVideoFlipped = pilot.VideoFlipped;
+            previousVideoMirrored = pilot.VideoMirrored;
+
+            // Set on pilot now so the preview PilotProfileNode picks them up
+            pilot.VideoFlipped = videoFlipped;
+            pilot.VideoMirrored = videoMirrored;
 
             if (!string.IsNullOrEmpty(existingFilename))
             {
@@ -412,7 +445,7 @@ namespace UI.Video
             Scale(0.8f, 0.6f);
             Node photoContainer = new Node();
             photoContainer.Scale(0.9f);
-            AddChild(photoContainer);   
+            AddChild(photoContainer);
 
             if (newPhoto.Exists)
             {
@@ -430,6 +463,8 @@ namespace UI.Video
 
         private void KeepOld()
         {
+            pilot.VideoFlipped = previousVideoFlipped;
+            pilot.VideoMirrored = previousVideoMirrored;
             Dispose();
         }
 
@@ -437,7 +472,8 @@ namespace UI.Video
         {
             try
             {
-                existingPhoto?.Delete();
+                if (existingPhoto != null && newPhoto.FullName != existingPhoto.FullName)
+                    existingPhoto?.Delete();
 
                 FileInfo newFileName = new FileInfo(newPhoto.FullName.Replace("_temp", ""));
                 if (newFileName.Exists)
@@ -448,6 +484,8 @@ namespace UI.Video
                 newPhoto.MoveTo(newFileName.FullName);
 
                 pilot.PhotoPath = Path.GetRelativePath(Directory.GetCurrentDirectory(), newFileName.FullName);
+                pilot.VideoFlipped = videoFlipped;
+                pilot.VideoMirrored = videoMirrored;
                 using (IDatabase db = DatabaseFactory.Open(eventId))
                 {
                     db.Upsert(pilot);

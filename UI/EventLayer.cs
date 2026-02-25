@@ -59,7 +59,7 @@ namespace UI
         private bool showPilotList;
 
         private ExternalData.RemoteNotifier RemoteNotifier;
-        private WorkQueue workQueueStartRace;
+        private WorkQueue workQueueStartStopRace;
 
         private SystemStatusNode systemStatusNode;
         
@@ -100,8 +100,7 @@ namespace UI
 
             DirectoryInfo eventDirectory = new DirectoryInfo(Path.Combine(ApplicationProfileSettings.Instance.EventStorageLocation, eventManager.Event.ID.ToString()));
 
-
-            workQueueStartRace = new WorkQueue("Event Layer - Start Race");
+            workQueueStartStopRace = new WorkQueue("Event Layer - Start Stop Race");
 
             showPilotList = true;
 
@@ -271,7 +270,7 @@ namespace UI
                 raceControl = this;
             }
 
-            eventWebServer = new EventWebServer(EventManager, SoundManager, raceControl, Theme.Current.ChannelColors);
+            eventWebServer = new EventWebServer(EventManager, SoundManager, raceControl, Theme.Current.ChannelColors, ApplicationProfileSettings.Instance.EventStorageLocation);
 
             if (ApplicationProfileSettings.Instance.HTTPServer)
             {
@@ -370,6 +369,11 @@ namespace UI
             }
 
             eventManager.RaceManager.OnHitPackLimit += RaceManager_OnHitPackLimit;
+
+            if (eventManager.RaceManager.TimingSystemManager.HasDummyTiming)
+            {
+                Popuper.PopupMessage("Warning / Reminder: Dummy timer is active");
+            }
         }
 
         private void RaceManager_OnHitPackLimit(Pilot pilot, int packCount)
@@ -514,7 +518,7 @@ namespace UI
             }
             SoundManager.Dispose();
             EventManager.Dispose();
-            workQueueStartRace.Dispose();
+            workQueueStartStopRace.Dispose();
             videoManager.Dispose();
             sceneManagerNode.Dispose();
 
@@ -882,7 +886,7 @@ namespace UI
                 return false;
             }
 
-            if (workQueueStartRace.QueueLength > 0)
+            if (workQueueStartStopRace.QueueLength > 0)
                 return false;
 
             if (LowDiskSpace())
@@ -919,10 +923,10 @@ namespace UI
                     wait.Set();
                 });
 
-                if (workQueueStartRace.QueueLength > 0)
+                if (workQueueStartStopRace.QueueLength > 0)
                     return false;
 
-                workQueueStartRace.Enqueue(() =>
+                workQueueStartStopRace.Enqueue(() =>
                 {
                     if (!wait.WaitOne(TimeSpan.FromSeconds(20)))
                     {
@@ -938,15 +942,27 @@ namespace UI
             }
             else if (delayedStart)
             {
-                if (workQueueStartRace.QueueLength > 0)
+                if (workQueueStartStopRace.QueueLength > 0)
                     return false;
 
-                workQueueStartRace.Enqueue(() =>
-                {
-                    bool failed = false;
+                bool failed = false;
 
-                    // Trigger the sound. The actual race start will happen after it ends
-                    SoundManager.StartRaceIn(EventManager.Event.MaxStartDelay, () =>
+                workQueueStartStopRace.Enqueue(() =>
+                {
+                    if (!EventManager.RaceManager.PreRaceStart())
+                    {
+                        failed = true;
+                        EventManager.RaceManager.CancelRaceStart(true);
+                    }
+                    ControlButtons.UpdateControlButtons();
+                });
+
+                // Trigger the sound. The actual race start will happen after it ends
+                SoundManager.StartRaceIn(EventManager.Event.MaxStartDelay, () =>
+                {
+                    // Put in the queue so it definitely happens after preRaceStart
+                    // Otherwise if audio is disabled it may happen before.
+                    workQueueStartStopRace.Enqueue(() =>
                     {
                         if (failed)
                             return;
@@ -957,23 +973,14 @@ namespace UI
                         }
                         ControlButtons.UpdateControlButtons();
                     });
-
-                    // Pre race start. Happens first because the sound is playing.
-                    if (!EventManager.RaceManager.PreRaceStart())
-                    {
-                        failed = true;
-                        EventManager.RaceManager.CancelRaceStart(true);
-
-                    }
-                    ControlButtons.UpdateControlButtons();
                 });
             }
             else
             {
-                if (workQueueStartRace.QueueLength > 0)
+                if (workQueueStartStopRace.QueueLength > 0)
                     return false;
 
-                workQueueStartRace.Enqueue(() =>
+                workQueueStartStopRace.Enqueue(() =>
                 {
                     EventManager.RaceManager.PreRaceStart();
                     EventManager.RaceManager.StartRaceInLessThan(TimeSpan.Zero, TimeSpan.Zero);
@@ -987,25 +994,27 @@ namespace UI
 
         public void StopRace()
         {
-            workQueueStartRace.Clear();
-
-            if (EventManager.RaceManager.PreRaceStartDelay)
+            workQueueStartStopRace.Clear();
+            workQueueStartStopRace.Enqueue(() =>
             {
-                EventManager.RaceManager.CancelRaceStart(false);
-                ControlButtons.UpdateControlButtons();
-            }
-            else
-            {
-                EventManager.RaceManager.EndRace();
-            }
+                if (EventManager.RaceManager.PreRaceStartDelay)
+                {
+                    EventManager.RaceManager.CancelRaceStart(false);
+                    ControlButtons.UpdateControlButtons();
+                }
+                else
+                {
+                    EventManager.RaceManager.EndRace();
+                }
 
-            videoManager.StopRecording();
+                videoManager.StopRecording();
+            });
         }
 
         public void EmergencyStop()
         {
-            StopRace();
             SoundManager.EmergencyStop();
+            StopRace();
         }
 
         public void Clear()

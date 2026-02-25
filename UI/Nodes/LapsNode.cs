@@ -118,7 +118,7 @@ namespace UI.Nodes
 
         private int GetLapsPerRowCount()
         {
-            if (!EventManager.RaceManager.RaceType.HasLapCount())
+            if (!EventManager.RaceManager.RaceType.HasLapCountLimit())
                 return 5;
 
             Race currentRace = EventManager.RaceManager.CurrentRace;
@@ -409,7 +409,7 @@ namespace UI.Nodes
                 if (laps.Any())
                 {
                     if (laps.Length != lapNodes.Where(ln => ln != null).Where(ln => ln.Visible).Count() ||
-                                        laps.FirstOrDefault() != lapNodes.First().Lap)
+                                        laps.FirstOrDefault() != lapNodes.FirstOrDefault()?.Lap)
                     {
                         RefreshData(laps);
                     }

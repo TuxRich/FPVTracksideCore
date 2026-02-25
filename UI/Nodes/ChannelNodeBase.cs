@@ -313,8 +313,9 @@ namespace UI.Nodes
             }
 
             pilotInfoContainer = new AnimatedRelativeNode();
-            pilotInfoContainer.RelativeBounds = new RectangleF(0, 0.03f, 0.4f, 0.185f);
+            SetProfileVisible(PilotProfileOptions.Small);
             DisplayNode.AddChild(pilotInfoContainer);
+
 
             pilotNameNode = new ChannelPilotNameNode(EventManager, Channel, ChannelColor, pilotAlpha);
             pilotNameNode.RelativeBounds = new RectangleF(0, 0, 1, 0.65f);
@@ -487,9 +488,6 @@ namespace UI.Nodes
                 pbBackground.Visible = PBNode.HasPB;
             }
 
-            // Set this again incase changing the pilot has changed things.
-            SetProfileVisible(pilotProfileOptions);
-
             if (EventManager.RaceManager.RaceType == EventTypes.Game)
             {
                 int points = EventManager.GameManager.GetCurrentGamePoints(Channel);
@@ -514,52 +512,70 @@ namespace UI.Nodes
 
         private PilotProfileOptions pilotProfileOptions;
 
-        public void SetProfileVisible(PilotProfileOptions options)
-        {
-            pilotProfileOptions = options;
+        public bool AlwaysSmallPilotProfile { get; set; }
 
-            if (ApplicationProfileSettings.Instance.AlwaysSmallPilotProfile && options == PilotProfileOptions.Large)
+        public void SetProfileVisible(PilotProfileOptions options, bool force = false)
+        {
+            bool snap = false;
+
+            if (!force && options != PilotProfileOptions.None)
             {
-                options = PilotProfileOptions.Small;
+                if (ApplicationProfileSettings.Instance.AlwaysSmallPilotProfile || AlwaysSmallPilotProfile)
+                {
+                    options = PilotProfileOptions.Small;
+                    snap = true;
+                }
             }
 
+            pilotProfileOptions = options;
+
             // Don't do the small option if we're not a video node.
-            if (this is not ChannelVideoNode)
+            if (GetType() == typeof(ChannelNodeBase))
             {
                 options = PilotProfileOptions.Large;
+                snap = true;
             }
 
             if (!PilotProfile.HasProfileImage)
             {
                 options = PilotProfileOptions.None;
+                snap = true;
             }
-
 
             switch (options)
             {
                 case PilotProfileOptions.None:
                     pilotInfoContainer.RelativeBounds = new RectangleF(0, 0.03f, 0.4f, 0.185f);
                     PilotProfile.SetAnimatedVisibility(false);
+                    
                     PilotProfile.RepeatVideo = false;
+                    PilotProfile.EnableMask = false;
                     break;
 
                 case PilotProfileOptions.Small:
                     PilotProfile.ProfileImageContainer.RelativeBounds = new RectangleF(0, 0.03f, 0.12f, 0.185f);
                     pilotInfoContainer.RelativeBounds = new RectangleF(PilotProfile.ProfileImageContainer.RelativeBounds.Right, 0.03f, 0.4f, 0.185f);
                     PilotProfile.SetAnimatedVisibility(true);
+                    
                     PilotProfile.RepeatVideo = false;
+                    PilotProfile.EnableMask = false;
                     break;
 
                 case PilotProfileOptions.Large:
                     pilotInfoContainer.RelativeBounds = new RectangleF(0, 0.03f, 0.4f, 0.185f);
                     PilotProfile.SetAnimatedVisibility(true);
 
-                    float bottomOfName = pilotInfoContainer.RelativeBounds.Bottom + 0.01f;
-
-                    PilotProfile.ProfileImageContainer.RelativeBounds = new RectangleF(0.4f, bottomOfName, 0.6f, 1 - bottomOfName);
                     PilotProfile.ProfileImageContainer.RelativeBounds = new RectangleF(0, 0, 1, 1);
                     PilotProfile.RepeatVideo = ApplicationProfileSettings.Instance.PilotProfileRepeatVideo;
+                    
+                    PilotProfile.EnableMask = true;
                     break;
+            }
+
+            if (snap)
+            {
+                pilotInfoContainer.Snap();
+                PilotProfile.Snap();
             }
         }
 
@@ -692,6 +708,15 @@ namespace UI.Nodes
                 return true;
             }
 
+            if (mouseInputEvent.ButtonState == ButtonStates.Released && 
+                CompositorLayer.InputEventFactory.AreAltKeysDown() && 
+                CompositorLayer.InputEventFactory.AreControlKeysDown() &&
+                mouseInputEvent.Button == MouseButtons.Left)
+            {
+                OnFullscreen?.Invoke();
+                return true;
+            }
+
             if (mouseInputEvent.ButtonState == ButtonStates.Released && CompositorLayer.InputEventFactory.AreAltKeysDown() && mouseInputEvent.Button == MouseButtons.Left)
             {
                 DateTime time = DateTime.Now;
@@ -709,12 +734,6 @@ namespace UI.Nodes
                 {
                     EventManager.GameManager.AddGamePoint(Pilot, Channel, time);
                 }
-                return true;
-            }
-
-            if (mouseInputEvent.ButtonState == ButtonStates.Released && mouseInputEvent.Button == MouseButtons.Left)
-            {
-                OnShowAll?.Invoke();
                 return true;
             }
 
@@ -794,9 +813,17 @@ namespace UI.Nodes
 
             if (mouseInputEvent.ButtonState == ButtonStates.Pressed && mouseInputEvent.Button == MouseButtons.Left)
             {
-                if (pilotProfileOptions == PilotProfileOptions.Large && PilotProfile.Contains(mouseInputEvent.Position))
+                if (PilotProfile.Contains(mouseInputEvent.Position) && PilotProfile.Visible)
                 {
-                    PilotProfile.ToggleAnimatedVisibility();
+                    switch (pilotProfileOptions)
+                    {
+                        case PilotProfileOptions.Large:
+                            SetProfileVisible(PilotProfileOptions.Small, true);
+                            break;
+                        case PilotProfileOptions.Small:
+                            SetProfileVisible(PilotProfileOptions.Large, true);
+                            break;
+                    }
                 }
 
                 return true;
@@ -869,7 +896,7 @@ namespace UI.Nodes
                 }
                 else
                 {
-                    showPosition = race.GetPosition(Pilot, out position, out behindWho, out behind);
+                    showPosition = race.GetTrackPosition(Pilot, out position, out behindWho, out behind);
                 }
 
                 if (Pilot.HasFinished(EventManager))
@@ -961,6 +988,19 @@ namespace UI.Nodes
             }
 
             return base.ToString();
+        }
+
+        public override Rectangle? CanDrop(MouseInputEvent finalInputEvent, Node node)
+        {
+            ChannelPilotNameNode otherPilotNameNode = node as ChannelPilotNameNode;
+            if (otherPilotNameNode != null)
+                return Bounds;
+            
+            IPilot pilotNode = node as IPilot;
+            if (pilotNode != null)
+                return Bounds;
+
+            return base.CanDrop(finalInputEvent, node);
         }
 
         public override bool OnDrop(MouseInputEvent finalInputEvent, Node node)

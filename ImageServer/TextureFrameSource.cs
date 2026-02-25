@@ -13,7 +13,7 @@ namespace ImageServer
     public abstract class TextureFrameSource : FrameSource
     {
         protected Thread imageProcessor;
-        protected bool processImages;
+        protected volatile bool processImages;
         private AutoResetEvent mutex;
 
         // Arrays for copying the data.
@@ -34,6 +34,11 @@ namespace ImageServer
 
         public override bool Start()
         {
+            if (!StopProcessing())
+            {
+                return false;
+            }
+            
             if (ASync)
             {
                 mutex = new AutoResetEvent(false);
@@ -51,37 +56,48 @@ namespace ImageServer
             return base.Start();
         }
 
-        public void StopProcessing()
+        public bool StopProcessing()
         {
+            if (!processImages)
+                return true;
+
+            //Stop processing frames.
             processImages = false;
 
+            //But trigger the mutex so we actually hit the while loop condition.
             if (mutex != null)
             {
                 mutex.Set();
             }
+
+            if (imageProcessor != null)
+            {
+                if (!imageProcessor.Join(10000))
+                {
+                    return false;
+                }
+                imageProcessor = null;
+            }
+
+            return true;
         }
 
         public override bool Stop()
         {
-            StopProcessing();
-
-            if (imageProcessor != null)
+            if (!StopProcessing())
             {
-                if (!imageProcessor.Join(5000))
-                {
-                    imageProcessor = null;
-                    return false && base.Stop();
-                }
-                imageProcessor?.Join();
-                imageProcessor = null;
+                base.Stop();
+                return false;
             }
-
+            
             return base.Stop();
         }
 
+
         public override void CleanUp()
         {
-            processImages = false;
+            StopProcessing();
+
             base.CleanUp();
 
             if (rawTextures != null)

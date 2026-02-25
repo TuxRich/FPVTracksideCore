@@ -6,8 +6,8 @@ namespace RaceLib.Format
 {
     public class AutoFormat : RoundFormat
     {
-        public AutoFormat(EventManager em) 
-            : base(em)
+        public AutoFormat(EventManager em, Stage stage = null)
+           : base(em, stage)
         {
         }
 
@@ -25,8 +25,6 @@ namespace RaceLib.Format
             }
             else
             {
-                newRound.RoundType = plan.CallingRound.RoundType;
-
                 lastRoundRaces = RaceManager.GetRaces(plan.CallingRound).ToArray();
                 brackets = lastRoundRaces.GetBrackets().ToArray();
             }

@@ -1,6 +1,4 @@
-﻿using UI.Nodes;
-using ImageServer;
-using Microsoft.Xna.Framework.Graphics;
+﻿using ImageServer;
 using RaceLib;
 using System;
 using System.Collections.Generic;
@@ -10,11 +8,7 @@ using System.Threading.Tasks;
 using Tools;
 using System.Threading;
 using System.IO;
-using Microsoft.Xna.Framework.Media;
 using Composition;
-using System.Text.RegularExpressions;
-using UI;
-using static UI.Video.VideoManager;
 
 namespace UI.Video
 {
@@ -50,7 +44,7 @@ namespace UI.Video
         public bool MaintainConnections { get; set; }
 
         private Thread videoDeviceManagerThread;
-        private bool runWorker;
+        private volatile bool runWorker;
         private List<Action> todo;
 
         private List<ICaptureFrameSource> recording;
@@ -119,6 +113,20 @@ namespace UI.Video
             return VideoFrameWorks.Available.FirstOrDefault(f => f.FrameWork == frameWork);
         }
 
+        public IEnumerable<FrameWork> GetNeedsInstall()
+        {
+            return VideoFrameWorks.Available.Where(f => f.NeedsInstall).Select(f => f.FrameWork);
+        }
+
+        public void Install(FrameWork frameWork)
+        {
+            VideoFrameWork videoFrameWork = GetFramework(frameWork);
+            if (videoFrameWork != null)
+            {
+                videoFrameWork.Install();
+            }
+        }
+
         public void LoadCreateDevices(FrameSourcesDelegate frameSources)
         {
             LoadDevices();
@@ -184,6 +192,7 @@ namespace UI.Video
 
         public void StopDevices()
         {
+            // Triggers all devices to stop.
             Clear();
 
             runWorker = false;
@@ -208,7 +217,7 @@ namespace UI.Video
             }
         }
 
-        public void Clear()
+        private void Clear()
         {
             Logger.VideoLog.LogCall(this);
             mutex.Set();
@@ -223,44 +232,21 @@ namespace UI.Video
             mutex.Set();
         }
 
+        public void ClearRestart()
+        {
+            StopDevices();
+            StartThread();
+        }
+
         public IEnumerable<VideoConfig> GetAvailableVideoSources()
         {
-            List<VideoConfig> configs = new List<VideoConfig>();
-
             foreach (VideoFrameWork videoFramework in VideoFrameWorks.Available)
             {
                 foreach (VideoConfig videoConfig in videoFramework.GetVideoConfigs())
                 {
-                    VideoConfig fromAnotherFramework = GetMatch(configs.Where(r => r.DeviceName == videoConfig.DeviceName), videoConfig.MediaFoundationPath, videoConfig.DirectShowPath);
-                    if (fromAnotherFramework != null)
-                    {
-                        if (fromAnotherFramework.DirectShowPath == null)
-                            fromAnotherFramework.DirectShowPath = videoConfig.DirectShowPath;
-
-                        if (fromAnotherFramework.MediaFoundationPath == null)
-                            fromAnotherFramework.MediaFoundationPath = videoConfig.MediaFoundationPath;
-                    }
-                    else
-                    {
-                        configs.Add(videoConfig);
-                    }
+                    yield return videoConfig;
                 }
             }
-
-            // Set any usbports
-            foreach (VideoConfig vc in configs)
-            {
-                if (configs.Where(other => other.DeviceName == vc.DeviceName).Count() > 1)
-                {
-                    vc.AnyUSBPort = false;
-                }
-                else
-                {
-                    vc.AnyUSBPort = true;
-                }
-            }
-
-            return configs;
         }
 
         public IEnumerable<string> GetAvailableAudioSources()
@@ -272,28 +258,6 @@ namespace UI.Video
                     yield return audioSource;
                 }
             }
-        }
-
-        private VideoConfig GetMatch(IEnumerable<VideoConfig> videoConfigs, params string[] paths)
-        {
-            if (paths.Any())
-            {
-                Regex regex = new Regex("(#[A-z0-9_&#]*)");
-
-                foreach (string path in paths)
-                {
-                    if (string.IsNullOrEmpty(path))
-                        continue;
-
-                    Match match = regex.Match(path);
-                    if (match.Success)
-                    {
-                        string common = match.Groups[1].Value;
-                        return videoConfigs.Where(v => v.PathContains(common)).FirstOrDefault();
-                    }
-                }
-            }
-            return null;
         }
 
         public bool GetStatus(VideoConfig videoConfig, out bool connected, out bool recording, out int height)
@@ -313,20 +277,6 @@ namespace UI.Video
 
             return false;
         }
-
-        //public IEnumerable<VideoConfig> GetUnavailableVideoSources()
-        //{
-        //    foreach (DsDevice ds in DirectShowHelper.VideoCaptureDevices)
-        //    {
-        //        VideoConfig videoConfig = new VideoConfig() { DeviceName = ds.Name, DirectShowPath = ds.DevicePath };
-        //        ds.Dispose();
-
-        //        if (!ValidDevice(videoConfig))
-        //        {
-        //            yield return videoConfig;
-        //        }
-        //    }
-        //}
 
         public bool ValidDevice(VideoConfig vc)
         {
@@ -396,10 +346,29 @@ namespace UI.Video
                         }
                         else
                         {
-                            VideoFrameWork mediaFoundation = VideoFrameWorks.GetFramework(FrameWork.MediaFoundation);
-                            if (mediaFoundation != null)
+                            IEnumerable<FrameWork> available = VideoFrameWorks.Available.Select(x => x.FrameWork);
+                            FrameWork recordingFrameWork = videoConfig.FrameWork;
+
+                            // DS can be viewed just fine in the better MF.
+                            if (recordingFrameWork == FrameWork.DirectShow)
+                                recordingFrameWork = FrameWork.MediaFoundation;
+
+#if !DEBUG
+                            // TODO Remove this once ffmpeg playback is working in windows..
+                            if (recordingFrameWork == FrameWork.FFmpeg && available.Contains(FrameWork.MediaFoundation))
+                                recordingFrameWork = FrameWork.MediaFoundation;
+#endif
+
+                            // just use the first available if the recording one isn't ok.
+                            if (!available.Contains(recordingFrameWork) && available.Any())
                             {
-                                source = mediaFoundation.CreateFrameSource(videoConfig);
+                                recordingFrameWork = available.FirstOrDefault();
+                            }
+
+                            VideoFrameWork framework = VideoFrameWorks.GetFramework(recordingFrameWork);
+                            if (framework != null)
+                            {
+                                source = framework.CreateFrameSource(videoConfig);
                             }
                         }
 
@@ -580,7 +549,6 @@ namespace UI.Video
                 foreach (FileInfo file in raceDirectory.GetFiles("*.recordinfo.xml"))
                 {
                     RecodingInfo videoInfo = null;
-
                     try
                     {
                         videoInfo = IOTools.ReadSingle<RecodingInfo>(raceDirectory.FullName, file.Name);
@@ -592,8 +560,19 @@ namespace UI.Video
 
                     if (videoInfo != null)
                     {
-                        if (File.Exists(videoInfo.FilePath))
+                        // Extract just the filename, handling both Windows and Mac path separators
+                        string filename = videoInfo.FilePath;
+                        int lastSlash = Math.Max(filename.LastIndexOf('/'), filename.LastIndexOf('\\'));
+                        if (lastSlash >= 0)
                         {
+                            filename = filename.Substring(lastSlash + 1);
+                        }
+
+                        // The video file should be in the race directory
+                        string resolvedPath = Path.Combine(raceDirectory.FullName, filename);
+                        if (File.Exists(resolvedPath))
+                        {
+                            videoInfo.FilePath = resolvedPath;
                             yield return videoInfo.GetVideoConfig();
                         }
                     }
@@ -601,18 +580,24 @@ namespace UI.Video
             }
         }
 
+        private FileInfo GetRecordingInfoFileName(FileInfo videoFile)
+        {
+            string noExtension = videoFile.NoExtension();
+            return new FileInfo(noExtension + ".recordinfo.xml");
+        }
+
         public void CreateFrameSource(IEnumerable<VideoConfig> videoConfigs, FrameSourcesDelegate frameSourcesDelegate)
         {
-            List<FrameSource> list = new List<FrameSource>();
-            foreach (var videoConfig in videoConfigs)
-            {
-                RemoveFrameSource(videoConfig);
-                FrameSource fs = CreateFrameSource(videoConfig);
-                list.Add(fs);
-            }
-
             DoOnWorkerThread(() =>
             {
+                List<FrameSource> list = new List<FrameSource>();
+                foreach (var videoConfig in videoConfigs)
+                {
+                    RemoveFrameSource(videoConfig);
+                    FrameSource fs = CreateFrameSource(videoConfig);
+                    list.Add(fs);
+                }
+
                 if (frameSourcesDelegate != null)
                 {
                     frameSourcesDelegate(list);
@@ -651,7 +636,7 @@ namespace UI.Video
                     {
                         file.Delete();
 
-                        FileInfo xmlconfig = new FileInfo(file.FullName.Replace(".wmv", ".recordinfo.xml"));
+                        FileInfo xmlconfig = GetRecordingInfoFileName(file);
                         if (xmlconfig.Exists)
                         {
                             xmlconfig.Delete();
@@ -671,18 +656,17 @@ namespace UI.Video
 
             DirectoryInfo parentDirectory = EventDirectory.Parent;
 
+            string[] fileExtensions = VideoFrameWorks.Available.SelectMany(f => f.GetFileExtensions()).Distinct().ToArray();
             foreach (DirectoryInfo eventDir in parentDirectory.EnumerateDirectories())
             {
                 foreach (DirectoryInfo raceDir in eventDir.EnumerateDirectories())
                 {
-                    foreach (FileInfo fileInfo in raceDir.GetFiles("*.wmv"))
+                    foreach (string extension in fileExtensions)
                     {
-                        yield return fileInfo;
-                    }
-
-                    foreach (FileInfo fileInfo in raceDir.GetFiles("*.mp4"))
-                    {
-                        yield return fileInfo;
+                        foreach (FileInfo fileInfo in raceDir.GetFiles("*" + extension))
+                        {
+                            yield return fileInfo;
+                        }
                     }
                 }
             }
@@ -780,9 +764,8 @@ namespace UI.Video
                                     {
                                         source.StopRecording();
                                         someFinalising = true;
+                                        needsVideoInfoWrite.Add((FrameSource)source);
                                     }
-
-                                    needsVideoInfoWrite.Add((FrameSource)source);
                                 }
                             }
                         }
@@ -802,9 +785,9 @@ namespace UI.Video
                                 if (source.FrameTimes != null && source.FrameTimes.Any())
                                 {
                                     RecodingInfo vi = new RecodingInfo(source);
-
-                                    FileInfo fileinfo = new FileInfo(vi.FilePath.Replace(".wmv", "") + ".recordinfo.xml");
-                                    IOTools.Write(fileinfo.Directory.FullName, fileinfo.Name, vi);
+                                    FileInfo videoFile = new FileInfo(vi.FilePath);
+                                    FileInfo recordingInfo = GetRecordingInfoFileName(videoFile);
+                                    IOTools.Write(recordingInfo.Directory.FullName, recordingInfo.Name, vi);
                                     needsVideoInfoWrite.Remove((FrameSource)source);
                                 }
                             }
@@ -973,17 +956,27 @@ namespace UI.Video
 
                         foreach (VideoFrameWork frameWork in VideoFrameWorks.Available)
                         {
-                            if (clone.FrameWork == frameWork.FrameWork)
+                            FrameSource source = null;
+                            try
                             {
                                 // Create a temporary instance just to get the modes...
-                                using (FrameSource source = frameWork.CreateFrameSource(clone))
+                                source = frameWork.CreateFrameSource(clone);
+                                if (source == null)
+                                    break;
+
+                                modes.AddRange(source.GetModes());
+                                if (source.RebootRequired)
                                 {
-                                    modes.AddRange(source.GetModes());
-                                    if (source.RebootRequired)
-                                    {
-                                        result.RebootRequired = true;
-                                    }
+                                    result.RebootRequired = true;
                                 }
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.VideoLog.LogException(this, ex);
+                            }
+                            finally
+                            {
+                                source?.Dispose();
                             }
                         }
                     }
@@ -991,8 +984,10 @@ namespace UI.Video
                     result.Modes = modes.Distinct().ToArray();
                     callback(result);
                 }
-                catch
+                catch (Exception ex) 
                 {
+                    Logger.VideoLog.LogException(this, ex);
+
                     callback(result);
                 }
             });

@@ -1,18 +1,19 @@
-﻿using Composition.Nodes;
+﻿using Composition;
+using Composition.Input;
+using Composition.Layers;
+using Composition.Nodes;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Input;
 using RaceLib;
+using RaceLib.Game;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Microsoft.Xna.Framework;
-using Composition;
-using Composition.Input;
 using Tools;
-using Composition.Layers;
-using Microsoft.Xna.Framework.Input;
-using System.ComponentModel;
-using RaceLib.Game;
+using UI.Video;
 
 namespace UI.Nodes.Rounds
 {
@@ -42,6 +43,24 @@ namespace UI.Nodes.Rounds
 
         public RoundsNode RoundsNode { get; private set; }
 
+        protected override Size MaxRenderTargetSize
+        {
+            get
+            {
+                // Calculate required size dynamically based on number of races
+                // No artificial caps - let the GPU handle its own limits
+                int racesPerColumn = RoundsNode?.RacesPerColumn ?? 3;
+                int raceCount = RaceNodes?.Count() ?? 0;
+                int columns = raceCount > 0 ? (int)Math.Ceiling(raceCount / (float)racesPerColumn) : 1;
+
+                // Estimate width needed per column
+                int estimatedWidthPerColumn = 600;
+                int requiredWidth = columns * estimatedWidthPerColumn;
+
+                return new Size(requiredWidth, 4096);
+            }
+        }
+
         public EventRoundNode(RoundsNode roundsNode, Round round)
             : base(roundsNode.EventManager, round)
         {
@@ -56,10 +75,10 @@ namespace UI.Nodes.Rounds
 
             string instructionText;
 
-            switch (round.RoundType)
+            switch (round.StageType)
             {
-                case Round.RoundTypes.DoubleElimination:
-                case Round.RoundTypes.Final:
+                case StageTypes.DoubleElimination:
+                case StageTypes.Final:
                     instructionText = Translator.Get("Label.RoundEmptyFinal", "Races will be automatically\nadded as more results come in.");
                     break;
                 default:
@@ -70,7 +89,6 @@ namespace UI.Nodes.Rounds
             TextNode instructions = new TextNode(instructionText, Theme.Current.Rounds.Text.XNA);
             instructions.Alignment = RectangleAlignment.Center;
             instructionNode.AddChild(instructions);
-
             AddChild(instructionNode);
 
             EventManager.OnEventChange += Refresh;
@@ -129,17 +147,16 @@ namespace UI.Nodes.Rounds
 
         private void UpdateTitle()
         {
-            if (Round.RoundType != Round.RoundTypes.Round)
+            if (Round.StageType != StageTypes.Default)
             {
-                string a = Round.RoundType.ToString();
+                string a = Round.StageType.ToString();
                 SetSubHeading(a.CamelCaseToHuman());
             }
             else
             {
-                var sf = EventManager.RoundManager.SheetFormatManager.GetRoundSheetFormat(Round);
-                if (sf != null)
+                if (Round.Stage != null && Round.Stage.HasSheetFormat)
                 {
-                    SetSubHeading(sf.Name);
+                    SetSubHeading(Round.Stage.Name);
                 }
                 else
                 {
@@ -238,7 +255,7 @@ namespace UI.Nodes.Rounds
 
             if (EventManager.ExternalRaceProviders != null)
             {
-                if (EventManager.RoundManager.GetLastRound(Round.EventType, Round.RoundType) == Round)
+                if (EventManager.RoundManager.GetLastRound(Round.EventType, Round.Stage) == Round)
                 {
                     foreach (var external in EventManager.ExternalRaceProviders)
                     {
@@ -251,7 +268,7 @@ namespace UI.Nodes.Rounds
             if (!hasRace)
             {
                 MouseMenu addFormat = mm.AddSubmenu("Set Format");
-                AddFormatMenu(addFormat);
+                AddFormatMenu(addFormat, EventManager.Event.Pilots);
             }
 
             if (hasRace)
@@ -275,6 +292,39 @@ namespace UI.Nodes.Rounds
             }
 
             mm.AddItem("Edit Round", EditRound);
+
+
+            if (Round.Stage != null)
+            {
+                mm.AddItem("Edit Stage", EditStage);
+
+                mm.AddItem("Remove Round from Stage", () =>
+                {
+                    PopupLayer pl = GetLayer<PopupLayer>();
+                    pl.PopupConfirmation("Remove from Stage?", () =>
+                    {
+                        LoadingLayer ll = GetLayer<LoadingLayer>();
+                        ll.WorkQueue.Enqueue("Deleting stage", () =>
+                        {
+                            EventManager.RoundManager.RemoveStage(Round);
+                            Refresh(true);
+                        });
+                    });
+                });
+
+                mm.AddItem("Delete Stage and contents", () =>
+                {
+                    PopupLayer pl = GetLayer<PopupLayer>();
+                    pl.PopupConfirmation("Delete Stage and contents (except finished races)", () => 
+                    {
+                        LoadingLayer ll = GetLayer<LoadingLayer>();
+                        ll.WorkQueue.Enqueue("Deleting stage", () =>
+                        {
+                            EventManager.RoundManager.DeleteStageAndContents(Round.Stage);
+                        });
+                    });
+                });
+            }
 
             if (!EventManager.Event.RulesLocked)
             {
@@ -417,7 +467,7 @@ namespace UI.Nodes.Rounds
             var timing = EventManager.RaceManager.TimingSystemManager.PrimeSystems.OfType<Timing.DummyTimingSystem>().FirstOrDefault();
             foreach (Race race in EventManager.RaceManager.GetRaces(Round))
             {
-                EventManager.RaceManager.GenerateResults(timing, race);
+                EventManager.RaceManager.GenerateResults(timing, race, true);
             }
             Refresh();
         }
@@ -454,6 +504,24 @@ namespace UI.Nodes.Rounds
                         db.Upsert(editor.Selected);
                     }
                     Refresh(true);
+                }
+            };
+        }
+
+
+        public void EditStage()
+        {
+            ObjectEditorNode<Stage> editor = new ObjectEditorNode<Stage>(Round.Stage);
+            GetLayer<PopupLayer>().Popup(editor);
+            editor.OnOK += (r) =>
+            {
+                if (editor.Selected != null)
+                {
+                    using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+                    {
+                        db.Upsert(editor.Selected);
+                    }
+                    RoundsNode.Refresh();
                 }
             };
         }
@@ -501,10 +569,15 @@ namespace UI.Nodes.Rounds
             canSum = true;
             canClone = true;
             canAddTimes = true;
-            canAddFinal = Round.RoundType != Round.RoundTypes.Final;
+            canAddFinal = Round.StageType != StageTypes.Final;
             canAddRace = true;
 
             RemoveRoundButton.Visible = canRemove;
+        }
+        
+        public override bool IsRoundInStage()
+        {
+            return Round.Stage != null;
         }
 
         public override IEnumerable<Pilot> GetOrderedPilots()
@@ -516,6 +589,43 @@ namespace UI.Nodes.Rounds
                     yield return pilot;
                 }
             }
+        }
+
+        public override Rectangle? CanDrop(MouseInputEvent mouseInputEvent, Node node)
+        {
+            EventRaceNode draggedRaceNode = node as EventRaceNode;
+            if (draggedRaceNode != null)
+            {
+                MouseInputEvent translated = Translate(mouseInputEvent);
+
+                Node n = FindDragTarget(translated);
+                Point location;
+                if (n == null)
+                {
+                    n = RaceNodes.OrderBy(r => r.Race.RaceNumber).LastOrDefault();
+                    if (n != null)
+                    {
+                        location = n.Bounds.Location;
+                        location.Y += n.Bounds.Height + 10;
+                    }
+                    else
+                    {
+                        location = contentContainer.Bounds.Location;
+                    }
+                }
+                else
+                {
+                    location = n.Bounds.Location;
+                }
+
+                Rectangle output = new Rectangle(location, draggedRaceNode.Bounds.Size);
+                output.Height = 2;
+                output.Y -= 5;
+
+                return TranslateBack(output);
+            }
+
+            return base.CanDrop(mouseInputEvent, node);
         }
 
         public override bool OnDrop(MouseInputEvent mouseInputEvent, Node node)
@@ -540,32 +650,25 @@ namespace UI.Nodes.Rounds
                     {
                         draggedRace.Round = Round;
 
-                        bool found = false;
+                        Node found = FindDragTarget(translated);
+
                         int number = 1;
-
-                        foreach (EventRaceNode racenode in RaceNodes.Except(new EventRaceNode[] { draggedRaceNode }).OrderBy(r => r.Race.RaceNumber))
+                        foreach (EventRaceNode racenode in RaceNodes.OrderBy(r => r.Race.RaceNumber))
                         {
+                            if (racenode == draggedRaceNode)
+                                continue;
 
-                            if (racenode.Bounds.Bottom > translated.Position.Y
-                             && racenode.Bounds.Right > translated.Position.X
-                             && racenode.Bounds.Left < translated.Position.X
-                             && !found)
+                            if (racenode == found)
                             {
-                                found = true;
                                 draggedRace.RaceNumber = number;
                                 number++;
+                            }
 
-                                racenode.Race.RaceNumber = number;
-                                number++;
-                            }
-                            else
-                            {
-                                racenode.Race.RaceNumber = number;
-                                number++;
-                            }
+                            racenode.Race.RaceNumber = number;
+                            number++;
                         }
 
-                        if (!found)
+                        if (found == null)
                         {
                             draggedRace.RaceNumber = number;
                         }
@@ -582,6 +685,21 @@ namespace UI.Nodes.Rounds
             }
 
             return base.OnDrop(mouseInputEvent, node);
+        }
+
+        public EventRaceNode FindDragTarget(MouseInputEvent translated)
+        {
+            foreach (EventRaceNode racenode in RaceNodes.OrderBy(r => r.Race.RaceNumber))
+            {
+                if (racenode.Bounds.Bottom > translated.Position.Y
+                             && racenode.Bounds.Right > translated.Position.X
+                             && racenode.Bounds.Left < translated.Position.X)
+                {
+                    return racenode;
+                }
+            }
+
+            return null;
         }
     }
 }

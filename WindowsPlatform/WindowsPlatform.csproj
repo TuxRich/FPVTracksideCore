@@ -3,17 +3,17 @@
 
 	<PropertyGroup>
 		<OutputType>Library</OutputType>
-		<TargetFramework>net60-windows</TargetFramework>
+		<TargetFramework>net9.0-windows</TargetFramework>
 		<ApplicationIcon />
 		<Platforms>x64</Platforms>
 		<StartupObject />
-		<Version>2.0.69.2</Version>
+		<Version>2.73.0.750</Version>
 		<usewpf>true</usewpf>	
 	</PropertyGroup>
 
 
 	<ItemGroup>
-		<PackageReference Include="MonoGame.Framework.WindowsDX" Version="3.8.1.303" />
+		<PackageReference Include="MonoGame.Framework.WindowsDX" Version="3.8.4.1" />
 		<PackageReference Include="System.Net.NameResolution" Version="4.3.0" />
 	  <PackageReference Include="System.Speech" Version="6.0.0" />
 	</ItemGroup>

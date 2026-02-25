@@ -1,13 +1,13 @@
-﻿ using System;
-using System.Collections.Generic;
+﻿using Composition.Text;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+ using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
-using Microsoft.Xna.Framework.Graphics;
-using Tools;
 using System.Threading;
-using Composition.Text;
+using System.Threading.Tasks;
+using Tools;
 
 namespace Composition
 {
@@ -34,6 +34,8 @@ namespace Composition
 
         public TextureCache TextureCache { get; private set; }
 
+        private bool textureCacheOwner;
+
         public BitmapFont BitmapFonts { get; private set; }
 
         public Point Offset { get; set; }
@@ -41,8 +43,14 @@ namespace Composition
         private bool hasBegun;
 
         public Drawer(GraphicsDevice device)
+            :this(device, new TextureCache(device, true))
         {
-            TextureCache = new TextureCache(device, true);
+            textureCacheOwner = true;
+        }
+
+        public Drawer(GraphicsDevice device, TextureCache textureCache)
+        {
+            TextureCache = textureCache;
             GraphicsDevice = device;
             SpriteBatch = new SpriteBatch(GraphicsDevice);
             clipRectangles = new Stack<Rectangle>();
@@ -72,7 +80,10 @@ namespace Composition
                 toClean.Dispose();
             }
 
-            TextureCache.Dispose();
+            if (textureCacheOwner)
+            {
+                TextureCache.Dispose();
+            }
 
             autoresetevent?.WaitOne(5000);
             autoresetevent?.Dispose();
@@ -84,7 +95,12 @@ namespace Composition
 
         public void QuickDraw(Rectangle dest)
         {
-            Draw(TextureCache.GetTextureFromColor(Color.Green), dest, Color.White, 0.5f);
+            QuickDraw(dest, Color.Green);
+        }
+
+        public void QuickDraw(Rectangle dest, Color color)
+        {
+            Draw(TextureCache.GetTextureFromColor(color), dest, Color.White, 0.5f);
         }
 
         public void Draw(Texture2D texture, Rectangle dest, Color tint, float alpha)
@@ -98,6 +114,14 @@ namespace Composition
             dest.Y += Offset.Y;
 
             SpriteBatch?.Draw(texture, dest, src, Color.FromNonPremultiplied(new Vector4(tint.ToVector3(), alpha)));
+        }
+
+        public void Draw(Texture2D texture, Rectangle src, Rectangle dest, Color tint, float rotation, Vector2 origin)
+        {
+            dest.X += Offset.X;
+            dest.Y += Offset.Y;
+
+            SpriteBatch?.Draw(texture, dest, src, tint, rotation, origin, SpriteEffects.None, 0);
         }
 
         public void Draw(Texture2D texture, Rectangle src, RectangleF dest, Color tint, float alpha)
@@ -133,6 +157,56 @@ namespace Composition
             scale.Y *= 1.0f / texture.Height;
 
             SpriteBatch.Draw(texture, point, null, Color.White, angle, origin, scale, SpriteEffects.None, 0);
+        }
+
+        public void DrawRect(Rectangle rectangle, Color color, float thickness = 1f)
+        {
+            Vector2 tl = new Vector2(rectangle.X, rectangle.Y);
+            Vector2 tr = new Vector2(rectangle.Right, rectangle.Y);
+            Vector2 bl = new Vector2(rectangle.X, rectangle.Bottom);
+            Vector2 br = new Vector2(rectangle.Right, rectangle.Bottom);
+
+            DrawLine(tl, tr, color, thickness);
+            DrawLine(tr, br, color, thickness);
+            DrawLine(br, bl, color, thickness);
+            DrawLine(bl, tl, color, thickness);
+        }
+
+        public void DrawMasked(Texture2D texture, Rectangle src, Texture2D mask, Rectangle maskSrc, Rectangle dest, Color tint)
+        {
+            SpriteBatch.End();
+
+            GraphicsDevice.Clear(ClearOptions.Stencil, Color.Transparent, 0, 0);
+            Matrix m = Matrix.CreateOrthographicOffCenter(0, GraphicsDevice.PresentationParameters.BackBufferWidth, GraphicsDevice.PresentationParameters.BackBufferHeight, 0, 0, 1);
+            AlphaTestEffect a1 = new AlphaTestEffect(GraphicsDevice)
+            {
+                Projection = m
+            };
+            DepthStencilState s1 = new DepthStencilState
+            {
+                StencilEnable = true,
+                StencilFunction = CompareFunction.Always,
+                StencilPass = StencilOperation.Replace,
+                ReferenceStencil = 1,
+                DepthBufferEnable = false,
+            };
+            DepthStencilState s2 = new DepthStencilState
+            {
+                StencilEnable = true,
+                StencilFunction = CompareFunction.LessEqual,
+                StencilPass = StencilOperation.Keep,
+                ReferenceStencil = 1,
+                DepthBufferEnable = false,
+            };
+            SpriteBatch.Begin(SpriteSortMode.Immediate, null, null, s1, null, a1);
+            SpriteBatch.Draw(mask, dest, maskSrc, tint); 
+            SpriteBatch.End();
+
+            SpriteBatch.Begin(SpriteSortMode.Immediate, null, null, s2, null, a1);
+            SpriteBatch.Draw(texture, dest, src, tint);
+            SpriteBatch.End();
+
+            SpriteBatch.Begin(SpriteSortMode.Deferred, blendState, SamplerState.AnisotropicClamp, null, null, null, null);
         }
 
         public void PushClipRectangle(Rectangle clip)

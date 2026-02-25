@@ -12,9 +12,12 @@ namespace RaceLib.Format
         public EventManager EventManager { get; private set; }
         public RaceManager RaceManager { get { return EventManager.RaceManager; } }
 
-        public RoundFormat(EventManager em)
+        public Stage Stage { get; private set; }
+
+        public RoundFormat(EventManager em, Stage stage)
         {
             EventManager = em;
+            Stage = stage;
         }
 
         public abstract IEnumerable<Race> GenerateRound(IDatabase db, IEnumerable<Race> preExisting, Round newRound, RoundPlan plan);
@@ -23,6 +26,16 @@ namespace RaceLib.Format
         {
             IEnumerable<Race> races = EventManager.RaceManager.GetRaces(round);
             return races.GetPilots().Distinct().ToArray();
+        }
+
+
+        public virtual void AdjustResults(Race race, IEnumerable<Result> results)
+        {
+        }
+
+        public IEnumerable<Race> GetCallingRoundRaces(RoundPlan plan)
+        {
+            return EventManager.RaceManager.GetRaces(plan.CallingRound);
         }
 
         public static int HeatCountFromSharedFrequencies(IEnumerable<PilotChannel> pilotChannels)
@@ -71,6 +84,5 @@ namespace RaceLib.Format
 
             return max;
         }
-
     }
 }

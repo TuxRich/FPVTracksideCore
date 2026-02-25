@@ -36,6 +36,14 @@ namespace UI.Nodes
 
             int nextRound = round.RoundNumber + 1;
 
+            Stage stage = Round.Stage;
+            if (stage != null && stage.GeneratesRounds)
+            {
+                TextButtonNode continueRound = new TextButtonNode("Continue " + round.Stage.Name, Theme.Current.Rounds.Foreground.XNA, Theme.Current.Hover.XNA, Theme.Current.Rounds.Text.XNA);
+                continueRound.OnClick += ContinueRound_OnClick;
+                nextItems.AddChild(continueRound);
+            }
+
             TextButtonNode change = new TextButtonNode("Randomise (Random channels)", Theme.Current.Rounds.Foreground.XNA, Theme.Current.Hover.XNA, Theme.Current.Rounds.Text.XNA);
             change.OnClick += Change_OnClick;
             nextItems.AddChild(change);
@@ -80,14 +88,14 @@ namespace UI.Nodes
 
         private void Change_OnClick(Composition.Input.MouseInputEvent mie)
         {
-            RoundPlan roundPlan = new RoundPlan(eventManager, Round);
+            RoundPlan roundPlan = new RoundPlan(eventManager, Round, Round.Stage);
             roundPlan.ChannelChange = RoundPlan.ChannelChangeEnum.Change;
             eventManager.RoundManager.GenerateRound(roundPlan);
         }
 
         private void Keep_OnClick(Composition.Input.MouseInputEvent mie)
         {
-            RoundPlan roundPlan = new RoundPlan(eventManager, Round);
+            RoundPlan roundPlan = new RoundPlan(eventManager, Round, Round.Stage);
             roundPlan.ChannelChange = RoundPlan.ChannelChangeEnum.KeepFromPreviousRound;
             eventManager.RoundManager.GenerateRound(roundPlan);
         }
@@ -100,6 +108,13 @@ namespace UI.Nodes
         private void LastAgain_OnClick(Composition.Input.MouseInputEvent mie)
         {
             eventManager.RoundManager.CloneLastHeat(Round);
+        }
+        private void ContinueRound_OnClick(Composition.Input.MouseInputEvent mie)
+        {
+            if (Round != null && Round.Stage != null)
+            {
+                eventManager.RoundManager.GenerateStageRound(Round, Round.Stage.StageType, new Pilot[0]);
+            }
         }
     }
 }

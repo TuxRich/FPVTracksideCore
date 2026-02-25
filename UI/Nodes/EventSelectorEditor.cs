@@ -1,5 +1,6 @@
 ﻿using Composition;
 using Composition.Input;
+using Composition.Layers;
 using Composition.Nodes;
 using ExternalData;
 using Microsoft.Xna.Framework;
@@ -11,13 +12,17 @@ using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Tools;
 
 namespace UI.Nodes
 {
+
     public class EventEditor : ObjectEditorNode<SimpleEvent>
     {
+        public static string dateFormat = "d MMM";
+
         public EventEditor(Event eventa) 
             :this(new SimpleEvent[] { new SimpleEvent(eventa) }, false, false)
         { 
@@ -26,6 +31,7 @@ namespace UI.Nodes
         protected EventEditor(IEnumerable<SimpleEvent> events, bool addRemove = true, bool cancelButtona = false)
             :base(events, addRemove, cancelButtona, false)
         {
+            AllowUnicode = true;
             Text = "Event Settings";
         }
 
@@ -159,17 +165,17 @@ namespace UI.Nodes
         public EventSelectorEditor(Texture2D logo, Profile profile)
             : this(new SimpleEvent[0], true, false)
         {
-
-            heading.RelativeBounds = new RectangleF(0, 0.18f, 1, 0.05f);
-            container.RelativeBounds = new RectangleF(0, heading.RelativeBounds.Bottom, 1, 1 - heading.RelativeBounds.Bottom);
-
             RelativeBounds = new RectangleF(0.2f, 0.01f, 0.6f, 0.98f);
+            mainDock.Top.SetFixedSize(230);
+
+            const float headingHeight = 0.2f;
+            heading.RelativeBounds = new RectangleF(0, 1 - headingHeight, 1, headingHeight);
 
             ColorNode colorNode = new ColorNode(Theme.Current.EventSelectorTop);
-            colorNode.RelativeBounds = new RectangleF(0, 0, 1, 0.175f);
-            AddChild(colorNode);
+            colorNode.RelativeBounds = new RectangleF(0, 0, 1, 1 - headingHeight);
+            mainDock.Top.AddChild(colorNode);
 
-            ImageNode logoNode = new ImageNode(logo);
+            ImageNode logoNode = new ImageNode(logo, true);
             logoNode.RelativeBounds = new RectangleF(0, 0, 1, 0.99f);
             logoNode.Alignment = RectangleAlignment.TopCenter;
             colorNode.AddChild(logoNode);
@@ -206,6 +212,10 @@ namespace UI.Nodes
             SimpleEvent lastOpened = Objects.OrderByDescending(e => e.LastOpened).FirstOrDefault();
 
             SetSelected(lastOpened);
+
+
+            Node[] buttons = new Node[] { addButton, removeButton, CloneButton, RecoverButton, cancelButton, okButton };
+            buttonContainer.SetOrder(buttons);
 
             AlignVisibleButtons();
         }
@@ -260,6 +270,29 @@ namespace UI.Nodes
 
         private void Clone(MouseInputEvent mie)
         {
+            PopupLayer ppl = GetLayer<PopupLayer>();
+            if (ppl == null)
+                return;
+
+            string newEventName = Selected.Name;
+            try
+            {
+                newEventName = Regex.Replace(newEventName, @"\([A-z0-9 ]*\)", "");
+            }
+            catch
+            {
+                newEventName = "Cloned Event";
+            }
+
+            newEventName = newEventName + " (" + DateTime.Now.ToString(dateFormat) + ")";
+
+            TextPopupNode textPopupNode = new TextPopupNode("Clone Event", "Event Name", newEventName);
+            textPopupNode.OnOK += Clone;
+            ppl.Popup(textPopupNode);
+        }
+
+        private void Clone(string newName)
+        {
             if (Selected != null)
             {
                 Event loaded = null;
@@ -270,7 +303,7 @@ namespace UI.Nodes
                 }
                 if (loaded != null)
                 {
-                    Event newEvent = loaded.Clone();
+                    Event newEvent = loaded.Clone(newName);
                     using (IDatabase db = DatabaseFactory.Open(newEvent.ID))
                     {
                         db.Insert(newEvent);
@@ -310,6 +343,12 @@ namespace UI.Nodes
                     return null;
                 }
             }
+
+            if (pi.Name == "TimeZone")
+            {
+                return new TimeZonePropertyNode<SimpleEvent>(obj, pi, ButtonBackground, TextColor, ButtonHover);
+            }
+
             return base.CreatePropertyNode(obj, pi);
         }
 
@@ -351,7 +390,38 @@ namespace UI.Nodes
 
         protected override void AddOnClick(MouseInputEvent mie)
         {
+            PopupLayer ppl = GetLayer<PopupLayer>();
+            if (ppl == null)
+                return;
+
+            string name = "New Event (" + DateTime.Now.ToString(dateFormat) + ")";
+
+            TextPopupNode textPopupNode = new TextPopupNode("New Event", "Event Name", name);
+            textPopupNode.OnOK += CreateNewEvent;
+            ppl.Popup(textPopupNode);
+        }
+
+        private void CreateNewEvent(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                PopupLayer ppl = GetLayer<PopupLayer>();
+                if (ppl == null)
+                    return;
+
+                ppl.PopupMessage("Cannot create event with empty name");
+
+                return;
+            }
+
             Event eve = CreateNewEvent();
+            eve.Name = name;
+
+            using (IDatabase db = DatabaseFactory.Open(Guid.Empty))
+            {
+                db.Update(eve); 
+            }
+
             AddNew(new SimpleEvent(eve));
         }
 

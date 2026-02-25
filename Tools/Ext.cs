@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -40,7 +41,12 @@ namespace Tools
             float intervals = (float)(DateTime.Now - start).TotalSeconds / intervalSeconds;
             int index = ((int)intervals) % length;
 
-            return things.GetAtIndex(index);
+            T result = things.GetAtIndex(index);
+            if (result.Equals(default(T)))
+            {
+                result = things.LastOrDefault();
+            }
+            return result;
         }
 
         public static T GetAtIndex<T>(this IEnumerable<T> things, int index)
@@ -54,7 +60,7 @@ namespace Tools
                 }
                 i++;
             }
-            return things.LastOrDefault();
+            return default(T);
         }
 
 
@@ -144,12 +150,55 @@ namespace Tools
 
         public static string ToCSV(this string[][] table)
         {
-            return string.Join("\r\n", table.Select(line => string.Join(",", line)));
+            return string.Join("\r\n", table.Select(line => string.Join(",", line.Select(i => i.NoControlCharacters()))));
         }
 
         public static string ToTSV(this string[][] table)
         {
-            return string.Join("\r\n", table.Select(line => string.Join("\t", line)));
+            return string.Join("\r\n", table.Select(line => string.Join("\t", line.Select(i => i.NoControlCharacters()))));
+        }
+
+        public static string NoControlCharacters(this string text)
+        {
+            string clean = "";
+            foreach (char c in text)
+            {
+                if (c < 32)
+                    continue;
+                if (c >= 127 && c < 160)
+                    continue;
+
+                clean += c;
+            }
+            return clean;
+        }
+
+        public static string AsciiOnly(this string text)
+        {
+            string clean = "";
+            foreach (char c in text)
+            {
+                if (c < 32)
+                    continue;
+                if (c >= 127 && c < 160)
+                    continue;
+
+                if (c >= 255)
+                    continue;
+
+                clean += c;
+            }
+            return clean;
+        }
+
+        public static string NoExtension(this FileInfo file)
+        {
+            if (file.FullName.EndsWith(file.Extension))
+            {
+                return file.FullName.Substring(0, file.FullName.Length - file.Extension.Length);
+            }
+
+            return file.FullName;
         }
 
         public static string ToString(this double? d, string f)
@@ -172,6 +221,14 @@ namespace Tools
             }
 
             return sb.ToString();
+        }
+
+        public static void SetValue<K, V>(this Dictionary<K,V> dict, K key, V value)
+        {
+            if (dict.ContainsKey(key))
+                dict[key] = value;
+            else
+                dict.Add(key, value);
         }
     }
 

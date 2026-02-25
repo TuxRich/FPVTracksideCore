@@ -2,8 +2,10 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
 using Tools;
@@ -42,7 +44,7 @@ namespace ImageServer
     {
         [System.ComponentModel.Browsable(true)]
         private string deviceName;
-        
+
         [Category("Device")]
         [System.ComponentModel.Browsable(false)]
         public string DeviceName
@@ -79,7 +81,7 @@ namespace ImageServer
 
         [System.ComponentModel.Browsable(false)]
         public string MediaFoundationPath { get; set; }
-        
+
         [System.ComponentModel.Browsable(false)]
         public string ffmpegId { get; set; }
 
@@ -89,7 +91,7 @@ namespace ImageServer
 
         [Category("Device")]
         public Mode VideoMode { get; set; }
-        
+
         [Category("Device")]
         [DisplayName("Flipped / Mirrored")]
         public FlipMirroreds FlipMirrored { get; set; }
@@ -102,7 +104,7 @@ namespace ImageServer
                 return FlipMirrored == FlipMirroreds.Flipped || FlipMirrored == FlipMirroreds.FlippedAndMirrored;
             }
         }
-        
+
         [Browsable(false)]
         public bool Mirrored
         {
@@ -155,24 +157,83 @@ namespace ImageServer
         [Category("Video Recording")]
         public string AudioDevice { get; set; }
 
+        private bool hardwareDecodeAcceleration;
+
+        [Category("Video Recording")]
+        [DisplayName("Hardware Decode Acceleration")]
+        [ConditionalFrameworks(FrameWork.FFmpeg)]
+        public bool HardwareDecodeAcceleration
+        {
+            get => IsCompressedVideoFormat ? hardwareDecodeAcceleration : false;
+            set => hardwareDecodeAcceleration = IsCompressedVideoFormat ? value : false;
+        }
+
+        [Browsable(false)]
+        public bool ShouldShowHardwareDecodeAcceleration => IsCompressedVideoFormat;
+
+        [Browsable(false)]
+        public bool IsCompressedVideoFormat
+        {
+            get
+            {
+                if (VideoMode?.Format == null)
+                    return false;
+
+                // Compressed formats that benefit from hardware decode acceleration
+                var compressedFormats = new[] { "h264", "h265", "hevc", "mjpeg" };
+                return compressedFormats.Contains(VideoMode.Format.ToLower());
+            }
+        }
+
+
         [System.ComponentModel.Browsable(false)]
         [JsonIgnore]
         [XmlIgnore]
         public FrameTime[] FrameTimes { get; set; }
 
         [System.ComponentModel.Browsable(false)]
-        public FrameWork FrameWork { get; set; }
+        [JsonIgnore]
+        [XmlIgnore]
+        public FrameWork FrameWork
+        {
+            get
+            {
+                return VideoMode.FrameWork;
+            }
+            set
+            {
+                VideoMode.FrameWork = value;
+            }
+        }
 
         public VideoBounds[] VideoBounds { get; set; }
 
         [System.ComponentModel.Browsable(false)]
         [JsonIgnore]
         [XmlIgnore]
-        public bool HasPhotoBooth 
-        { 
+        public bool HasPhotoBooth
+        {
             get
             {
                 return VideoBounds.Any(vb => vb.SourceType == SourceTypes.PhotoBooth);
+            }
+        }
+
+        [System.ComponentModel.Browsable(false)]
+        [JsonIgnore]
+        [XmlIgnore]
+        public IEnumerable<string> IDPaths
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(MediaFoundationPath))
+                    yield return MediaFoundationPath;
+
+                if (!string.IsNullOrEmpty(DirectShowPath))
+                    yield return DirectShowPath;
+
+                if (!string.IsNullOrEmpty(ffmpegId))
+                    yield return ffmpegId;
             }
         }
 
@@ -193,6 +254,7 @@ namespace ImageServer
             FrameTimes = new FrameTime[0];
             DeviceLatency = 0;
             AudioDevice = "None";
+            HardwareDecodeAcceleration = false;
         }
 
         public override string ToString()
@@ -208,15 +270,43 @@ namespace ImageServer
                 }
             }
 
-            if (AnyUSBPort || DirectShowPath == null)
-            {
+            return name;
+        }
+
+        public string ToStringUnique(IEnumerable<VideoConfig> others)
+        {
+            string name = ToString();
+
+            VideoConfig[] sameName = others.Where(r => r != this && r.DeviceName.ToLower().Trim() == DeviceName.ToLower().Trim()).ToArray();
+
+            // no other devices
+            if (sameName.Length == 0)
                 return name;
-            }
-            else
+
+            // If there are the same device with different frameworks
+            int frameworkCount = sameName.Select(o => o.FrameWork).Distinct().Count();
+            if (frameworkCount == sameName.Length)
             {
-                string hashCode = DirectShowPath.GetHashCode().ToString("X8");
-                return name + " #" + hashCode.Substring(0, 2);
+                name += " - " + FrameWork.ToString();
             }
+
+            // End up just hashing the id.
+            if (sameName.Any(r => r.FrameWork == FrameWork))
+            {
+                string toHash = DirectShowPath;
+                if (toHash == null)
+                    toHash = MediaFoundationPath;
+                if (toHash == null)
+                    toHash = ffmpegId;
+
+                if (toHash != null)
+                {
+                    string hashCode = toHash.GetHashCode().ToString("X8");
+                    name += " #" + hashCode.Substring(0, 2);
+                }
+            }
+
+            return name;
         }
 
         private const string filename = "VideoSettings.xml";
@@ -239,8 +329,6 @@ namespace ImageServer
 
         public static VideoConfig[] Read(Profile profile)
         {
-
-
             VideoConfig[] s = null;
             try
             {
@@ -270,39 +358,74 @@ namespace ImageServer
 
             VideoConfig other = obj as VideoConfig;
 
-            if (!string.IsNullOrEmpty(other.FilePath) && other.FilePath == FilePath)
-                return true;
+            if (other.FrameWork != FrameWork)
+                return false;
 
-            if (!string.IsNullOrEmpty(other.DirectShowPath) && other.DirectShowPath == DirectShowPath)
-                return true;
+            if (!string.IsNullOrEmpty(other.FilePath) && other.FilePath != FilePath)
+                return false;
 
-            if (!string.IsNullOrEmpty(other.MediaFoundationPath) && other.MediaFoundationPath == MediaFoundationPath)
-                return true;
+            if (!string.IsNullOrEmpty(other.DirectShowPath) && other.DirectShowPath != DirectShowPath)
+                return false;
 
-            return false;
+            if (!string.IsNullOrEmpty(other.MediaFoundationPath) && other.MediaFoundationPath != MediaFoundationPath)
+                return false;
+
+            // Compare device names for camera/capture devices
+            if (!string.IsNullOrEmpty(other.DeviceName) && other.DeviceName != DeviceName)
+                return false;
+
+            return true;
         }
 
         public override int GetHashCode()
         {
             int hash = 17;
-            if (DirectShowPath != null) hash += DirectShowPath.GetHashCode();
-            if (MediaFoundationPath != null) hash += MediaFoundationPath.GetHashCode();
+            if (DirectShowPath != null)
+                hash += DirectShowPath.GetHashCode();
+            if (MediaFoundationPath != null)
+                hash += MediaFoundationPath.GetHashCode();
+            if (DeviceName != null)
+                hash += DeviceName.GetHashCode();
 
             return hash;
         }
 
-        public bool PathContains(string common)
+        public bool Matches(VideoConfig other)
         {
-            if (MediaFoundationPath != null && MediaFoundationPath.Contains(common))
-            {
-                return true;
-            }
+            Regex mfds = new Regex("(#[A-z0-9_&#]*)");
+            Regex dsff = new Regex("({[A-z0-9-]*}\\\\{[A-z0-9-]*})");
 
-            if (DirectShowPath != null && DirectShowPath.Contains(common))
-            {
-                return true;
-            }
+            Regex[] regexes = [mfds, dsff];
 
+            foreach (string path in IDPaths)
+            {
+                if (string.IsNullOrEmpty(path))
+                    continue;
+
+                foreach (Regex regex in regexes)
+                {
+                    Match match = regex.Match(path);
+                    if (match.Success)
+                    {
+                        string common = match.Groups[1].Value;
+                        if (other.IDPaths.Any(p => p.Contains(common)))
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+            }
+            return false;
+        }
+
+        public bool Matches(IEnumerable<VideoConfig> others)
+        {
+            foreach (VideoConfig other in others)
+            {
+                if (other.Matches(this))
+                    return true;
+            }
             return false;
         }
     }
@@ -320,7 +443,7 @@ namespace ImageServer
     {
         [System.ComponentModel.Browsable(false)]
         public string Channel { get; set; }
-        
+
         [System.ComponentModel.Browsable(false)]
         public RectangleF RelativeSourceBounds { get; set; }
 
@@ -329,14 +452,14 @@ namespace ImageServer
 
         [Category("Overlay")]
         public string OverlayText { get; set; }
-        
+
         [Category("Overlay")]
         public OverlayAlignment OverlayAlignment { get; set; }
 
         [Category("Other")]
         [DisplayName("Show during Races")]
         public bool ShowInGrid { get; set; }
-        
+
         [Category("Other")]
         public bool Crop { get; set; }
 
@@ -374,15 +497,53 @@ namespace ImageServer
             {
                 default:
                 case Splits.Custom:
-                case Splits.SingleChannel: HorizontalSplits = 1; VerticalSplits = 1; break;
-                case Splits.TwoByTwo: HorizontalSplits = 2; VerticalSplits = 2; break;
-                case Splits.ThreeByTwo: HorizontalSplits = 3; VerticalSplits = 2; break;
-                case Splits.ThreeByThree: HorizontalSplits = 3; VerticalSplits = 3; break;
-                case Splits.ThreeByFour: HorizontalSplits = 3; VerticalSplits = 4; break;
-                case Splits.FourByTwo: HorizontalSplits = 4; VerticalSplits = 2; break;
-                case Splits.FourByThree: HorizontalSplits = 4; VerticalSplits = 3; break;
-                case Splits.FourByFour: HorizontalSplits = 4; VerticalSplits = 4; break;
+                case Splits.SingleChannel:
+                    HorizontalSplits = 1;
+                    VerticalSplits = 1;
+                    break;
+                case Splits.TwoByTwo:
+                    HorizontalSplits = 2;
+                    VerticalSplits = 2;
+                    break;
+                case Splits.ThreeByTwo:
+                    HorizontalSplits = 3;
+                    VerticalSplits = 2;
+                    break;
+                case Splits.ThreeByThree:
+                    HorizontalSplits = 3;
+                    VerticalSplits = 3;
+                    break;
+                case Splits.ThreeByFour:
+                    HorizontalSplits = 3;
+                    VerticalSplits = 4;
+                    break;
+                case Splits.FourByTwo:
+                    HorizontalSplits = 4;
+                    VerticalSplits = 2;
+                    break;
+                case Splits.FourByThree:
+                    HorizontalSplits = 4;
+                    VerticalSplits = 3;
+                    break;
+                case Splits.FourByFour:
+                    HorizontalSplits = 4;
+                    VerticalSplits = 4;
+                    break;
             }
+        }
+    }
+
+    public class ConditionalFrameworksAttribute : Attribute
+    {
+        public FrameWork[] FrameWorks { get; set; }
+        public ConditionalFrameworksAttribute(params FrameWork[] frameWork)
+        {
+            this.FrameWorks = frameWork;
+        }
+
+        public bool Has(FrameWork frameWork)
+        {
+            return FrameWorks.Contains(frameWork);
         }
     }
 }

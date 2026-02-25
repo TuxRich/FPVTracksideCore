@@ -48,6 +48,14 @@ namespace Composition.Nodes
         private bool hasLayedOut;
         private Rectangle lastLayoutBounds;
 
+        protected virtual Size MaxRenderTargetSize
+        {
+            get
+            {
+                return new Size(4096, 4096);
+            }
+        }
+
         public ScrollerNode Scroller { get; private set; }
         public Point ScrollOffset
         {
@@ -188,6 +196,13 @@ namespace Composition.Nodes
             {
                 alpha *= Tint.A / 255.0f;
             }
+
+            if (drawer == null)
+            {
+                drawer = new Drawer(id.GraphicsDevice, id.TextureCache);
+                drawer.CanMultiThread = false;
+            }
+
             lock (renderTargetLock)
             {
                 if (renderTarget != null)
@@ -284,14 +299,14 @@ namespace Composition.Nodes
                     {
                         if (drawer == null)
                         {
-                            drawer = new Drawer(CompositorLayer.GraphicsDevice);
-                            drawer.CanMultiThread = false;
+                            return;
                         }
 
                         Size maxSize = Size;
 
-                        maxSize.Width = Math.Min(4096, maxSize.Width);
-                        maxSize.Height = Math.Min(4096, maxSize.Height);
+                        Size limits = MaxRenderTargetSize;
+                        maxSize.Width = Math.Min(limits.Width, maxSize.Width);
+                        maxSize.Height = Math.Min(limits.Height, maxSize.Height);
 
                         bool isAnimating = false;
                         if (Parent != null && Parent.IsAnimating())
@@ -459,6 +474,27 @@ namespace Composition.Nodes
                 output = new MouseInputEnterEvent(output);
             }
             return output;
+        }
+
+        public Rectangle TranslateBack(Rectangle rect)
+        {
+            return new Rectangle(rect.X + Bounds.X, rect.Y + Bounds.Y, rect.Width, rect.Height);
+        }
+
+        public override Rectangle? CanDrop(MouseInputEvent mouseInputEvent, Node node)
+        {
+            MouseInputEvent translated = Translate(mouseInputEvent);
+
+            Rectangle? output = base.CanDrop(translated, node);
+
+            if (output != null)
+            {
+                Rectangle rectangle = output.Value;
+                rectangle.X += Bounds.X;
+                rectangle.Y += Bounds.Y;
+                return rectangle;
+            }
+            return null;
         }
 
         public override bool OnDrop(MouseInputEvent mouseInputEvent, Node node)

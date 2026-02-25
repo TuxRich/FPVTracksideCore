@@ -118,7 +118,14 @@ namespace UI.Nodes.Rounds
                 }
                 heading.Scale(0.98f, 1);
 
-                NeedsInit = false;
+                if (Race.Started)
+                {
+                    TextNode time = new TextNode(Race.Start.ToShortTimeString(), Theme.Current.Rounds.Text.XNA);
+                    time.RelativeBounds = new RectangleF(0.55f, 0.30f, 0.4f, 0.4f);
+                    time.Alignment = RectangleAlignment.CenterRight;
+                    time.Alpha = 0.5f;
+                    heading.AddChild(time);
+                }
             }
         }
 
@@ -270,7 +277,17 @@ namespace UI.Nodes.Rounds
                 mm.AddSubmenu("Set Race Bracket", SetBracket, Enum.GetValues(typeof(Brackets)).OfType<Brackets>().ToArray());
                 mm.AddItem("Open Race Folder", () =>
                 {
-                    PlatformTools.OpenFileManager(Directory.GetCurrentDirectory() + "\\events\\" + EventManager.EventId + "\\" + Race.ID + "\\");
+                    // Use the same logic as the HTTP service to find the events folder
+                    string eventsPath = ApplicationProfileSettings.Instance.EventStorageLocation;
+                    if (string.IsNullOrEmpty(eventsPath))
+                    {
+                        eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", "events");
+                    }
+                    else if (!Path.IsPathRooted(eventsPath))
+                    {
+                        eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", eventsPath);
+                    }
+                    PlatformTools.OpenFileManager(Path.Combine(eventsPath, EventManager.EventId.ToString(), Race.ID.ToString()));
                 });
                 if (pilot != null)
                 {
@@ -367,9 +384,15 @@ namespace UI.Nodes.Rounds
                     mm.AddBlank();
                     mm.AddItem("Generate Dummy Race Results", () =>
                     {
-                        EventManager.RaceManager.GenerateResults(EventManager.RaceManager.TimingSystemManager.PrimeSystems.OfType<Timing.DummyTimingSystem>().FirstOrDefault(), Race);
+                        EventManager.RaceManager.GenerateResults(EventManager.RaceManager.TimingSystemManager.PrimeSystems.OfType<Timing.DummyTimingSystem>().FirstOrDefault(), Race, true);
                         Refresh();
                     });
+
+                    //mm.AddItem("Generate Dummy Race Results and Open", () =>
+                    //{
+                    //    EventManager.RaceManager.GenerateResults(EventManager.RaceManager.TimingSystemManager.PrimeSystems.OfType<Timing.DummyTimingSystem>().FirstOrDefault(), Race, false);
+                    //    Refresh();
+                    //});
                 }
 
                 mm.Show(mouseInputEvent);
@@ -507,6 +530,7 @@ namespace UI.Nodes.Rounds
         {
             if (NeedsInit)
             {
+                NeedsInit = false;
                 Init();
             }
             base.Layout(parentBounds);
@@ -607,11 +631,26 @@ namespace UI.Nodes.Rounds
             return base.OnMouseInput(mouseInputEvent);
         }
 
-        public override bool OnDrop(MouseInputEvent finalInputEvent, Node node)
+        public override Rectangle? CanDrop(MouseInputEvent finalInputEvent, Node node)
         {
             PilotRaceInfoNode prin = node as PilotRaceInfoNode;
             IPilot ipilotnode = node as IPilot;
 
+            if (ipilotnode != null || prin != null)
+            {
+                if (!EventRaceNode.Race.Ended)
+                {
+                   return Bounds;
+                }
+            }
+
+            return base.CanDrop(finalInputEvent, node);
+        }
+
+        public override bool OnDrop(MouseInputEvent finalInputEvent, Node node)
+        {
+            PilotRaceInfoNode prin = node as PilotRaceInfoNode;
+            IPilot ipilotnode = node as IPilot;
             if (ipilotnode == null)
                 return false;
 
@@ -637,6 +676,7 @@ namespace UI.Nodes.Rounds
                     }
                 }
             }
+            EventManager ev = EventRaceNode.EventManager;
 
             using (IDatabase db = DatabaseFactory.Open(EventRaceNode.EventManager.EventId))
             {
@@ -650,6 +690,8 @@ namespace UI.Nodes.Rounds
                         EventRaceNode.SyncSheetChange();
                         prin.EventRaceNode.SyncSheetChange();
                         EventRaceNode.Refresh();
+
+                        ev.RefreshIfIsCurrent(EventRaceNode.Race, oldRace);
                         return true;
                     }
 
@@ -659,6 +701,8 @@ namespace UI.Nodes.Rounds
                         EventRaceNode.SyncSheetChange();
                         prin.EventRaceNode.SyncSheetChange();
                         EventRaceNode.Refresh();
+
+                        ev.RefreshIfIsCurrent(EventRaceNode.Race, oldRace);
                         return true;
                     }
                 }
@@ -678,6 +722,7 @@ namespace UI.Nodes.Rounds
                         EventRaceNode.Refresh();
                     }
 
+                    ev.RefreshIfIsCurrent(EventRaceNode.Race);
                     return true;
                 }
             }

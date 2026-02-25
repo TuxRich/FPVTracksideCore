@@ -307,23 +307,23 @@ namespace UI.Nodes
             {
                 openDirectory.AddItem("Open Event Data Directory", () =>
                 {
-                    OpenCurrentDirectory("events\\" + eventManager.EventId + "\\");
+                    OpenCurrentDirectory("events", eventManager.EventId.ToString());
                 });
             }
 
             openDirectory.AddItem("Open Events Directory", () =>
             {
-                OpenCurrentDirectory("events\\");
+                OpenCurrentDirectory("events");
             });
 
             openDirectory.AddItem("Open Pilot Profile Image Directory", () =>
             {
-                OpenCurrentDirectory("pilots\\");
+                OpenCurrentDirectory("pilots");
             });
 
             openDirectory.AddItem("Open Tracks Directory", () =>
             {
-                OpenCurrentDirectory("Tracks\\");
+                OpenCurrentDirectory("Tracks");
             });
 
             openDirectory.AddItem("Open FPVTrackside Directory", () =>
@@ -525,7 +525,7 @@ namespace UI.Nodes
             editor.OnOK += (e) =>
             {
                 ApplicationProfileSettings.Write(Profile, profileSettings);
-                if (hasEvent && Restart != null && editor.NeedsRestart)
+                if (Restart != null && editor.NeedsRestart)
                 {
                     GetLayer<PopupLayer>().PopupConfirmation("Changes require restart to take effect. Restart now?", () => { Restart(evennt); });
                 }
@@ -576,12 +576,48 @@ namespace UI.Nodes
             GetLayer<PopupLayer>().Popup(editor);
         }
 
-        public void OpenCurrentDirectory(string addition = "")
+        public void OpenCurrentDirectory(params string[] paths)
         {
-            string path = Directory.GetCurrentDirectory();
-            if (!string.IsNullOrEmpty(addition))
+            string path;
+
+            // Special handling for "events" paths - use the same logic as HTTP service
+            if (paths.Any() && paths[0] == "events")
             {
-                path = Path.Combine(path, addition);
+                string eventsPath = ApplicationProfileSettings.Instance.EventStorageLocation;
+
+                // Trim off some legacy slashes.
+                if (eventsPath.EndsWith("/") || eventsPath.EndsWith("\\"))
+                {
+                    eventsPath = eventsPath.Substring(0, eventsPath.Length - 1);
+                }
+
+                if (string.IsNullOrEmpty(eventsPath))
+                {
+                    eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", "events");
+                }
+                else if (!Path.IsPathRooted(eventsPath))
+                {
+                    eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", eventsPath);
+                }
+
+                // Append any additional path components after "events"
+                if (paths.Length > 1)
+                {
+                    path = Path.Combine(eventsPath, Path.Combine(paths.Skip(1).ToArray()));
+                }
+                else
+                {
+                    path = eventsPath;
+                }
+            }
+            else
+            {
+                // Use IOTools.WorkingDirectory instead of Directory.GetCurrentDirectory()
+                path = IOTools.WorkingDirectory?.FullName ?? "";
+                if (paths.Any())
+                {
+                    path = Path.Combine(path, Path.Combine(paths));
+                }
             }
 
             PlatformTools.OpenFileManager(path);

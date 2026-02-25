@@ -8,6 +8,16 @@ using System.Threading.Tasks;
 
 namespace RaceLib.Format
 {
+
+    public enum PilotOrdering
+    {
+        Default,
+        MinimisePreviouslyFlown,
+        Ordered,
+        Seeded,
+        Random,
+    }
+
     public class RoundPlan
     {
         public enum ChannelChangeEnum
@@ -15,16 +25,8 @@ namespace RaceLib.Format
             Change,
             KeepFromPreviousRound
         }
-
-        public enum PilotOrderingEnum
-        {
-            MinimisePreviouslyFlown,
-            Ordered,
-            Seeded,
-        }
-
         [Browsable(false)]
-        public Round CallingRound { get; private set; }
+        public Round CallingRound { get; set; }
 
         [Category("Races")]
         public bool AutoNumberOfRaces { get; set; }
@@ -33,7 +35,7 @@ namespace RaceLib.Format
         public int NumberOfRaces { get; set; }
 
         [Category("Races")]
-        public PilotOrderingEnum PilotSeeding { get; set; }
+        public PilotOrdering PilotSeeding { get; set; }
 
         [Category("Channels")]
         public ChannelChangeEnum ChannelChange { get; set; }
@@ -44,8 +46,26 @@ namespace RaceLib.Format
         [Category("Pilots")]
         public Pilot[] Pilots { get; set; }
 
-        public RoundPlan(EventManager eventManager, Round previousRound)
+        [Category("Stage")]
+        [Browsable(false)]
+        public bool KeepStage { get; set; }
+
+        [Category("Stage")]
+        [Browsable(false)]
+        public Stage Stage { get; set; }
+
+        public EventTypes EventType { get; set; }
+
+
+        public RoundPlan(EventManager eventManager, Round previousRound, Stage stage, IEnumerable<Pilot> orderedPilots)
+            :this(eventManager, previousRound, stage)
         {
+            Pilots = orderedPilots.ToArray();
+        }
+
+        public RoundPlan(EventManager eventManager, Round previousRound, Stage stage)
+        {
+            EventType = eventManager.Event.EventType;
             AutoNumberOfRaces = true;
             CallingRound = previousRound;
             Channels = eventManager.Channels;
@@ -61,7 +81,9 @@ namespace RaceLib.Format
                 NumberOfRaces = eventManager.RaceManager.GetRaces(previousRound).Count();
             }
             ChannelChange = ChannelChangeEnum.KeepFromPreviousRound;
-            PilotSeeding = PilotOrderingEnum.MinimisePreviouslyFlown;
+            PilotSeeding = PilotOrdering.MinimisePreviouslyFlown;
+            Stage = stage;
+            KeepStage = true;
         }
     }
 }

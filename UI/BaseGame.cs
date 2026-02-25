@@ -135,14 +135,15 @@ namespace UI
         {
             GeneralSettings.Initialise();
 
-            Profile = new Profile(GeneralSettings.Instance.Profile);
+            Profile = new Profile(PlatformTools.WorkingDirectory, GeneralSettings.Instance.Profile);
             ApplicationProfileSettings.Initialize(Profile);
 
             if (!ApplicationProfileSettings.Instance.UseDirectX9)
             {
                 GraphicsDeviceManager.GraphicsProfile = GraphicsProfile.HiDef;
-                GraphicsDeviceManager.ApplyChanges();
             }
+            GraphicsDeviceManager.SynchronizeWithVerticalRetrace = ApplicationProfileSettings.Instance.VSync;
+            GraphicsDeviceManager.ApplyChanges();
 
             Window.Position = new Point(Math.Max(Window.Position.X, 0), Math.Max(Window.Position.Y, 0));
 
@@ -178,10 +179,10 @@ namespace UI
             MenuLayer menuLayer = new MenuLayer(GraphicsDevice, Theme.Current.MenuBackground.XNA, Theme.Current.Hover.XNA, Theme.Current.MenuText.XNA, Theme.Current.MenuTextInactive.XNA, Theme.Current.ScrollBar.XNA);
             DragLayer dragLayer = new DragLayer(GraphicsDevice);
 
-            LayerStack.Add(loadingLayer);
             LayerStack.Add(popupLayer);
             LayerStack.Add(menuLayer);
             LayerStack.Add(dragLayer);
+            LayerStack.Add(loadingLayer);
 
             LayerStack.Add(new SponsorLayer(GraphicsDevice));
 #if DEBUG
@@ -206,10 +207,8 @@ namespace UI
             int frameRate = Math.Min(1000, Math.Max(1, ApplicationProfileSettings.Instance.FrameRateLimit));
             TargetElapsedTime = TimeSpan.FromSeconds(1f / frameRate);
             IsFixedTimeStep = true;
-            GraphicsDeviceManager.SynchronizeWithVerticalRetrace = ApplicationProfileSettings.Instance.VSync;
-            GraphicsDeviceManager.ApplyChanges();
 
-
+            
             loadingLayer.WorkQueue.Enqueue("Database Upgrade", DatabaseUpgrade);
 
             loadingLayer.WorkQueue.Enqueue("Load Translations", LoadTranslations);
@@ -280,7 +279,7 @@ namespace UI
         {
             Logger.UI.LogCall(this);
 
-            Profile profile = new Profile(GeneralSettings.Instance.Profile);
+            Profile profile = new Profile(PlatformTools.WorkingDirectory, GeneralSettings.Instance.Profile);
 
             CompositorLayer welcomeLayer = new CompositorLayer(GraphicsDevice);
             WelcomeSetupNode welcomeSetupNode = new WelcomeSetupNode(Banner, profile);

@@ -130,7 +130,7 @@ namespace RaceLib
             switch (eventType)
             {
                 case EventTypes.Race:
-                case EventTypes.AggregateLaps:
+                case EventTypes.Endurance:
                     return true;
 
                 default:
@@ -138,7 +138,7 @@ namespace RaceLib
             }
         }
 
-        public static bool HasLapCount(this EventTypes eventType)
+        public static bool HasLapCountLimit(this EventTypes eventType)
         {
             switch (eventType)
             {
@@ -215,10 +215,16 @@ namespace RaceLib
             return races.Where(r => r.Bracket == bracket);
         }
 
-        public static Round GetRound(this IEnumerable<Race> races)
+        public static Round GetFirstRound(this IEnumerable<Race> races)
         {
-            Round firstRound = races.Select(r => r.Round).FirstOrDefault();
+            Round firstRound = races.Select(r => r.Round).OrderBy(r => r.Order).FirstOrDefault();
             return firstRound;
+        }
+
+        public static Round GetLastRound(this IEnumerable<Race> races)
+        {
+            Round last = races.Select(r => r.Round).OrderBy(r => r.Order).LastOrDefault();
+            return last;
         }
 
         public static IEnumerable<Race> GetRacesInRound(this IEnumerable<Race> races, int round)
@@ -255,15 +261,14 @@ namespace RaceLib
 
             string name = "";
 
-            switch (lastRound.RoundType)
+            Stage stage = lastRound.Stage;
+            if (stage != null)
             {
-                case Round.RoundTypes.Round:
-                    name = RaceStringFormatter.Instance.GetEventTypeText(lastEventType);
-                    break;
-                case Round.RoundTypes.DoubleElimination:
-                case Round.RoundTypes.Final:
-                    name = lastRound.RoundType.ToString().CamelCaseToHuman();
-                    break;
+                name = stage.ToString();
+            }
+            else
+            {
+                name = RaceStringFormatter.Instance.GetEventTypeText(lastEventType);
             }
 
             output += name + " Round ";
@@ -284,13 +289,20 @@ namespace RaceLib
 
             output += string.Join(", ", numbers.ToArray());
 
-            if (lastRound.PointSummary != null)
+            PointSummary pointSummary = null;
+            if (lastRound.Stage != null)
+            {
+                pointSummary = lastRound.Stage.PointSummary;
+            }
+
+            if (pointSummary != null)
             {
                 List<string> strings = new List<string>();
 
-                if (lastRound.PointSummary.DropWorstRound)
+                if (pointSummary.DropWorstRound)
                     strings.Add("Drops worst round");
-                if (lastRound.PointSummary.RoundPositionRollover && lastRound.RoundType == Round.RoundTypes.Final)
+
+                if (pointSummary.RoundPositionRollover && lastRound.StageType == StageTypes.Final)
                 {
                     strings.Add("Rolls over");
                 }
@@ -435,6 +447,41 @@ namespace RaceLib
         public static string PhoneticNoComma(this Pilot[] pilots)
         {
             return string.Join(" ", pilots.Select(p => p.Phonetic));
+        }
+
+        public static IEnumerable<Pilot> Seed(this IEnumerable<Pilot> orderedPilots, int channelCount)
+        {
+            List<Pilot> pilots = orderedPilots.ToList();
+            int racesCount = (int)(Math.Ceiling(pilots.Count / (float)channelCount));
+
+            List<Pilot>[] races = new List<Pilot>[racesCount];
+            for (int i = 0; i < racesCount; i++)
+            {
+                races[i] = new List<Pilot>();
+            }
+
+            int currentRace = 0;
+            foreach (Pilot pilot in orderedPilots)
+            {
+                races[currentRace].Add(pilot);
+                currentRace = (currentRace + 1) % racesCount;
+            }
+
+            foreach (List<Pilot> race in races)
+            {
+                while (race.Count < channelCount)
+                {
+                    race.Add(null);
+                }
+            }
+
+            foreach (List<Pilot> race in races)
+            {
+                foreach (Pilot pilot in race)
+                {
+                    yield return pilot;
+                }
+            }
         }
     }
 }

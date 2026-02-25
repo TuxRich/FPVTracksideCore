@@ -73,6 +73,8 @@ namespace UI
 
         public TrackTheme TrackTheme { get; set; }
 
+        public ToolTexture PilotProfileMask { get; set; }
+
         public static Theme Current { get; private set; }
 
         public Theme()
@@ -126,6 +128,7 @@ namespace UI
             };
 
             TrackTheme = new TrackTheme();
+            PilotProfileMask = null;
         }
 
         public static List<Theme> Themes { get; private set; }
@@ -140,7 +143,7 @@ namespace UI
 
             foreach (DirectoryInfo directory in directoryInfo.GetDirectories("*"))
             {
-                FileInfo themeFile = new FileInfo(directory.FullName + "/theme.xml");
+                FileInfo themeFile = new FileInfo(Path.Combine(directory.FullName, "theme.xml"));
                 if (themeFile.Exists)
                 {
                     Theme theme;
@@ -171,7 +174,7 @@ namespace UI
                 //    IOTools.Write(directory.FullName, theme2Fil2e.Name, theme2);
                 //}
 
-                FileInfo theme2File = new FileInfo(directory.FullName + "/theme2.xml");
+                FileInfo theme2File = new FileInfo(Path.Combine(directory.FullName,"theme2.xml"));
                 if (theme2File.Exists)
                 {
                     Theme2 theme2;
@@ -205,7 +208,7 @@ namespace UI
         {
             List<Theme> themes = new List<Theme>();
 
-            DirectoryInfo themesDirectory = new DirectoryInfo(Path.Combine(workingDirectory.FullName, "themes/"));
+            DirectoryInfo themesDirectory = new DirectoryInfo(Path.Combine(workingDirectory.FullName, "themes"));
 
             themes.AddRange(Load(themesDirectory, gd));
 
@@ -230,6 +233,8 @@ namespace UI
             {
                 Current = Themes.FirstOrDefault();
             }
+
+            Logger.UI.LogCall(Current, "Theme.Init");
 
             if (Current == null)
             {

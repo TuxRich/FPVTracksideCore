@@ -43,7 +43,7 @@ namespace Sound
 
         private Race lastAnnounced;
         private bool announceConnection;
-        private bool initialised;
+        private volatile bool initialised;
 
         public static SoundManager Instance { get; private set; }
 
@@ -851,7 +851,7 @@ namespace Sound
             {
                 case EventTypes.Endurance:
                     {
-                        int position = lap.Race.GetPosition(lap.Pilot);
+                        int position = lap.Race.GetTrackPosition(lap.Pilot);
 
                         parameters.Priority = LapNumberToPriority(lap.Detection, position);
 
@@ -866,7 +866,7 @@ namespace Sound
                     }
                 case EventTypes.Race:
                     {
-                        int position = lap.Race.GetPosition(lap.Pilot);
+                        int position = lap.Race.GetTrackPosition(lap.Pilot);
 
                         parameters.Priority = LapNumberToPriority(lap.Detection, position);
 
@@ -956,7 +956,7 @@ namespace Sound
 
             if (race != null && pilot != null)
             {
-                int position = race.GetPosition(pilot);
+                int position = race.GetTrackPosition(pilot);
 
                 SpeechParameters parameters = new SpeechParameters();
                 parameters.Add(SpeechParameters.Types.pilot, pilot.Phonetic);

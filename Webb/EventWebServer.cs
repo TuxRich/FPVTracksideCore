@@ -26,7 +26,8 @@ namespace Webb
         private IRaceControl raceControl;
 
         private Thread thread;
-        public bool Running { get; private set; }
+        private volatile bool running;
+        public bool Running => running;
 
         private HttpListener listener;
 
@@ -36,14 +37,17 @@ namespace Webb
 
         private bool localOnly;
 
+        private string eventStorageLocation;
+
         public ToolColor[] ChannelColors { get; private set; }
 
-        public EventWebServer(EventManager eventManager, SoundManager soundManager, IRaceControl raceControl, IEnumerable<Tools.ToolColor> channelColors)
+        public EventWebServer(EventManager eventManager, SoundManager soundManager, IRaceControl raceControl, IEnumerable<Tools.ToolColor> channelColors, string eventStorageLocation = null)
         {
-            CSSStyleSheet = new FileInfo("httpfiles/style.css");
+            CSSStyleSheet = new FileInfo(Path.Combine("httpfiles", "style.css"));
             this.eventManager = eventManager;
             this.soundManager = soundManager;
             this.raceControl = raceControl;
+            this.eventStorageLocation = eventStorageLocation;
             Url = "http://localhost:8080/";
 
             if (!CSSStyleSheet.Exists)
@@ -64,7 +68,7 @@ namespace Webb
         {
             try
             {
-                Running = true;
+                running = true;
 
                 if (thread != null)
                 {
@@ -174,21 +178,44 @@ namespace Webb
                 string[] parameters = requestPath.Skip(1).ToArray();
 
                 string content = "";
-                DirectoryInfo eventRoot = new DirectoryInfo("events/" + eventManager.Event.ID.ToString());
+                // Get the event storage location (passed in constructor or fall back to working directory)
+                string eventsPath = eventStorageLocation;
+                if (string.IsNullOrEmpty(eventsPath))
+                {
+                    // Fallback: use working directory + events
+                    eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", "events");
+                }
+                else if (!Path.IsPathRooted(eventsPath))
+                {
+                    // Make relative paths absolute
+                    eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", eventsPath);
+                }
+                DirectoryInfo eventRoot = new DirectoryInfo(Path.Combine(eventsPath, eventManager.Event.ID.ToString()));
                 switch (action)
                 {
                     case "events":
-                        string target = string.Join('\\', requestPath);
+                        // Build the full path: replace "events" prefix with the actual event storage location
+                        string[] pathWithoutEvents = requestPath.Skip(1).ToArray(); // Remove "events" from the path
+                        string target = Path.Combine(eventsPath, Path.Combine(pathWithoutEvents));
 
-                        if (target == "")
+                        Logger.HTTP.Log(this, "Request: " + path + " -> Target: " + target + " (EventsPath: " + eventsPath + ")");
+
+                        if (target == eventsPath || string.IsNullOrEmpty(target))
                             target = eventRoot.FullName;
 
                         if (target.Contains("."))
                         {
                             if (File.Exists(target))
                             {
+                                // Set content type for JSON files
+                                if (target.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    context.Response.ContentType = "application/json";
+                                }
+                                Logger.HTTP.Log(this, "Serving file: " + target);
                                 return File.ReadAllBytes(target);
                             }
+                            Logger.HTTP.Log(this, "File not found: " + target);
                             return new byte[0];
                         }
                         else
@@ -208,12 +235,12 @@ namespace Webb
             }
 
 
-            FileInfo file = new FileInfo(string.Join('\\', requestPath));
+            FileInfo file = new FileInfo(Path.Combine(requestPath));
 
 #if DEBUG
             string[] basehttpFilesDir = new string[] { "..", "..", "..", "..", "..", "..", "..","FPVTracksideCore","Webb" };
 
-            string combined = Path.Combine(string.Join('\\', basehttpFilesDir), string.Join('\\', requestPath));
+            string combined = Path.Combine(Path.Combine(basehttpFilesDir), Path.Combine(requestPath));
 
             FileInfo debugAdjustedFile = new FileInfo(combined);
             if (debugAdjustedFile.Exists)
@@ -225,10 +252,10 @@ namespace Webb
             if (!file.Exists)
             {
                 requestPath = new string[] { "httpfiles", "index.html" };
-                file = new FileInfo(string.Join('\\', requestPath));
+                file = new FileInfo(Path.Combine(requestPath));
                 if (!file.Exists)
                 {
-                    return new byte[0]; 
+                    return new byte[0];
                 }
             }
 
@@ -376,7 +403,7 @@ namespace Webb
 
         public bool Stop()
         {
-            Running = false;
+            running = false;
             listener?.Abort();
             thread?.Join();
 

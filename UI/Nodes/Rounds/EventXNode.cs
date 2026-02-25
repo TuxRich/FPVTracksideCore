@@ -1,5 +1,6 @@
 ﻿using Composition;
 using Composition.Input;
+using Composition.Layers;
 using Composition.Nodes;
 using Microsoft.Xna.Framework;
 using RaceLib;
@@ -10,6 +11,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Tools;
+using static RaceLib.Round;
 
 namespace UI.Nodes.Rounds
 {
@@ -27,14 +29,15 @@ namespace UI.Nodes.Rounds
         protected ColorNode headingbg;
 
         public delegate void RoundDelegate(Round round);
+        public delegate void RoundStageDelegate(Round round, Stage stage);
         public delegate void RoundTimeDelegate(Round round, TimeSummary.TimeSummaryTypes type);
 
         public event RoundDelegate AddRound;
         public event RoundDelegate ChangeChannels;
         public event RoundDelegate Finals;
         public event RoundDelegate Clone;
-        public event RoundDelegate AddEmptyRound;
-        public event RoundDelegate DoubleElim;
+        public event RoundDelegate AddSheetFormatRound;
+        public event Action<Round, StageTypes, IEnumerable<Pilot>> AddStage;
 
         public event RoundDelegate RemoveRound;
         public event RoundDelegate SumPoints;
@@ -42,7 +45,8 @@ namespace UI.Nodes.Rounds
         public event RoundTimeDelegate Times;
         public event RoundDelegate LapCounts;
 
-        public event RoundDelegate CustomRound;
+        public event RoundStageDelegate AddEmptyRound;
+        public event RoundStageDelegate CustomRound;
 
         public event Action NeedsFormatLayout;
 
@@ -56,6 +60,17 @@ namespace UI.Nodes.Rounds
         protected bool canClone;
         protected bool canAddFinal;
         protected bool canAddRace;
+
+        public virtual int Order
+        {
+            get
+            {
+                if (Round == null)
+                    return 0;
+
+                return Round.Order;
+            }
+        }
 
         public EventXNode(EventManager ev, Round round)
         {
@@ -101,7 +116,12 @@ namespace UI.Nodes.Rounds
             UpdateButtons();
         }
 
-        public void SetHeading(string text)
+        public virtual bool IsRoundInStage()
+        {
+            return false;
+        }
+
+        public virtual void SetHeading(string text)
         {
             heading.Text = text;
         }
@@ -150,7 +170,7 @@ namespace UI.Nodes.Rounds
 
             if (EventManager.ExternalRaceProviders != null)
             {
-                if (EventManager.RoundManager.GetLastRound(Round.EventType, Round.RoundType) == Round)
+                if (EventManager.RoundManager.GetLastRound(Round.EventType, Round.Stage) == Round)
                 {
                     if (EventManager.RaceManager.GetRaces(Round).All(r => r.Ended))
                     {
@@ -163,34 +183,30 @@ namespace UI.Nodes.Rounds
                 }
             }
 
-            var sf = EventManager.RoundManager.SheetFormatManager.GetRoundSheetFormat(Round);
-            if (sf != null)
-            {
-                rootMenu.AddItem("Add Next Sheet Round", AddSheetFormatRound);
-            }
-
-
             // Add round
             {
                 MouseMenu addRound = rootMenu.AddSubmenu("Add Round");
                 AddButtonRoundMenu(addRound);
             }
 
-            if (GetOrderedPilots().Any())
+            if (!IsRoundInStage())
             {
-                MouseMenu format = rootMenu.AddSubmenu("Add Format");
-                AddFormatMenu(format);
+                Pilot[] pilots = GetOrderedPilots().ToArray();
+                if (EventManager.RoundManager.IsEmpty(Round))
+                {
+                    MouseMenu format = rootMenu.AddSubmenu("Set Format");
+                    AddFormatMenu(format, pilots);
+                }
+                else
+                {
+                    MouseMenu format = rootMenu.AddSubmenu("Add Format");
+                    AddFormatMenu(format, pilots);
+                }
             }
-            else
-            {
-                MouseMenu format = rootMenu.AddSubmenu("Set Format");
-                AddFormatMenu(format);
-            }
-
 
             if (EventManager.ExternalRaceProviders != null)
             {
-                if (EventManager.RoundManager.GetLastRound(Round.EventType, Round.RoundType) == Round)
+                if (EventManager.RoundManager.GetLastRound(Round.EventType, Round.Stage) == Round)
                 {
                     foreach (var external in EventManager.ExternalRaceProviders)
                     {
@@ -200,31 +216,29 @@ namespace UI.Nodes.Rounds
                 }
             }
 
-            if (canSum || canAddTimes || canAddLapCount)
+            if ((canSum || canAddTimes || canAddLapCount) && !IsRoundInStage())
             {
-                MouseMenu results = rootMenu.AddSubmenu("Show Results");
+                MouseMenu results = rootMenu.AddSubmenu("Add Results Stage");
                 if (canSum)
-                    results.AddItem("Show Points", () => { SumPoints?.Invoke(Round); });
+                    results.AddItem("Points Stage", () => { SumPoints?.Invoke(Round); });
 
                 if (canAddTimes)
                 {
-                    results.AddItem("Show PB Records", () => { Times?.Invoke(Round, TimeSummary.TimeSummaryTypes.PB); });
-                    results.AddItem("Show Event Lap Records", () => { Times?.Invoke(Round, TimeSummary.TimeSummaryTypes.EventLap); });
-                    results.AddItem("Show Race Time Records", () => { Times?.Invoke(Round, TimeSummary.TimeSummaryTypes.RaceTime); });
+                    results.AddItem("PB Records Stage", () => { Times?.Invoke(Round, TimeSummary.TimeSummaryTypes.PB); });
+                    results.AddItem("Event Lap Records Stage", () => { Times?.Invoke(Round, TimeSummary.TimeSummaryTypes.EventLap); });
+                    results.AddItem("Race Time Records Stage", () => { Times?.Invoke(Round, TimeSummary.TimeSummaryTypes.RaceTime); });
                 }
 
                 if (canAddLapCount)
-                    results.AddItem("Show Lap Count", () => { LapCounts?.Invoke(Round); });
+                    results.AddItem("Lap Count Stage", () => { LapCounts?.Invoke(Round); });
                 
-                results.AddItem("Show Pack Count", () => { PackCount?.Invoke(Round); });
+                results.AddItem("Pack Count Stage", () => { PackCount?.Invoke(Round); });
             }
         }
 
-        protected void AddFormatMenu(MouseMenu format)
+        protected void AddFormatMenu(MouseMenu menu, IEnumerable<Pilot> orderedPilots)
         {
-            format.AddItem("Double Elimination", () => { DoubleElim?.Invoke(Round); });
-
-            //add format
+            MouseMenu sheets = menu.AddSubmenu("From Spreadsheet");
             if (EventManager.RoundManager.SheetFormatManager.Sheets.Any())
             {
                 foreach (SheetFormatManager.SheetFile sheet in EventManager.RoundManager.SheetFormatManager.Sheets)
@@ -232,14 +246,36 @@ namespace UI.Nodes.Rounds
                     string name = sheet.Name + " (" + sheet.Pilots + " pilots)";
 
                     var sheet2 = sheet;
-                    format.AddItem(name, () => { SheetFormat(sheet2); });
+                    sheets.AddItem(name, () => { SheetFormat(sheet2, orderedPilots); });
                 }
+            }
+
+            menu.AddBlank();
+
+            foreach (StageTypes stageType in Enum.GetValues<StageTypes>().Except([StageTypes.Default]))
+            {
+                string name = stageType.ToString().CamelCaseToHuman();
+                StageTypes local = stageType;
+
+                menu.AddItem(name, () => { AddStage?.Invoke(Round, local, orderedPilots); });
             }
         }
 
         protected virtual void AddButtonRoundMenu(MouseMenu addRound)
         {
-            addRound.AddItem("Empty", () => { AddEmptyRound?.Invoke(Round); });
+            Stage stage = null;
+            if (IsRoundInStage())
+            {
+                stage = Round.Stage;
+
+                if (stage.GeneratesRounds)
+                {
+                    addRound.AddItem("Continue " + stage.Name, ContinueStageRound);
+                    addRound.AddBlank();
+                }
+            }
+
+            addRound.AddItem("Empty", () => { AddEmptyRound?.Invoke(Round, stage); });
             if (canClone)
             {
                 addRound.AddItem("Clone", () => { Clone?.Invoke(Round); });
@@ -250,40 +286,48 @@ namespace UI.Nodes.Rounds
 
             if (canAddFinal)
                 addRound.AddItem("Final", () => { Finals?.Invoke(Round); });
-            addRound.AddItem("Custom Round", () => { CustomRound?.Invoke(Round); });
+            addRound.AddItem("Custom Round", () => { CustomRound?.Invoke(Round, stage); });
         }
 
-        private void AddSheetFormatRound()
+        private void ContinueStageRound()
         {
-            RoundSheetFormat roundSheetFormat = EventManager.RoundManager.SheetFormatManager.GetRoundSheetFormat(Round);
+            if (Round.Stage == null)
+                return; 
 
-            if (EventManager.RaceManager.GetRaces(Round).Any() && roundSheetFormat != null)
+            if (Round.Stage.HasSheetFormat)
             {
-                Round newRound = EventManager.RoundManager.GetCreateRound(Round.RoundNumber + 1, Round.EventType);
-                roundSheetFormat.GenerateSingleRound(newRound);
+                AddSheetFormatRound(Round);
+            }
+            else 
+            {
+                AddStage(Round, Round.Stage.StageType, GetOrderedPilots().ToArray());
             }
         }
 
-        private void SheetFormat(SheetFormatManager.SheetFile sheet)
+        private void SheetFormat(SheetFormatManager.SheetFile sheet, IEnumerable<Pilot> orderedPilots)
         {
-            Round newRound;
-
-            if (EventManager.RaceManager.GetRaces(Round).Any())
+            LoadingLayer ll = GetLayer<LoadingLayer>();
+            ll.WorkQueue.Enqueue("Loading format", () =>
             {
-                newRound = EventManager.RoundManager.GetCreateRound(Round.RoundNumber + 1, Round.EventType);
-            }
-            else
-            {
-                newRound = Round;
-            }
+                Stage stage = null;
+                using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+                {
+                    stage = new Stage();
+                    stage.ID = Guid.NewGuid();
+                    stage.Name = sheet.Name;
+                    stage.SheetFormatFilename = sheet.FileInfo.Name;
 
-            using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
-            {
-                newRound.SheetFormatFilename = sheet.FileInfo.Name;
-                db.Update(newRound);
-            }
+                    db.Insert(stage);
 
-            EventManager.RoundManager.SheetFormatManager.LoadSheet(newRound, GetOrderedPilots().ToArray(), true);
+                    bool empty = !EventManager.RaceManager.GetRaces(Round).Any();
+                    if (empty)
+                    {
+                        Round.Stage = stage;
+                        db.Update(Round);
+                    }
+                }
+                EventManager.RoundManager.SheetFormatManager.LoadSheet(stage, orderedPilots.ToArray(), true);
+            });
         }
 
         protected void AddRace()
@@ -315,7 +359,7 @@ namespace UI.Nodes.Rounds
 
         public virtual IEnumerable<Pilot> GetOrderedPilots()
         {
-            return new Pilot[0];
+            return EventManager.Event.Pilots;
         }
     }
 }

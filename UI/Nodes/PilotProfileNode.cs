@@ -3,6 +3,7 @@ using Composition.Input;
 using Composition.Nodes;
 using ImageServer;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using RaceLib;
 using System;
 using System.Collections.Generic;
@@ -23,6 +24,10 @@ namespace UI.Nodes
         public Pilot Pilot { get; set; }
 
         public TextNode TextNode { get; set; }
+
+        private bool needsLoadAttempt;
+        private string filename;
+        private bool showText;
 
         public bool HasProfileImage { get; private set; }
 
@@ -49,6 +54,28 @@ namespace UI.Nodes
                 {
                     fileFrameNode.Repeat = value;
                 }
+            }
+        }
+
+        public bool EnableMask
+        {
+            set
+            {
+                if (PilotPhoto is ImageMaskedNode)
+                {
+                    ImageMaskedNode imageMaskedNode = PilotPhoto as ImageMaskedNode;
+                    if (imageMaskedNode != null)
+                    {
+                        imageMaskedNode.EnableMask = value;
+                    }
+
+                    FileFrameMaskedNode fileFrameMaskedNode = PilotPhoto as FileFrameMaskedNode;
+                    if (fileFrameMaskedNode != null)
+                    {
+                        fileFrameMaskedNode.EnableMask = value;
+                    }
+                }
+
             }
         }
 
@@ -80,17 +107,34 @@ namespace UI.Nodes
         public void SetPilot(Pilot pilot, string filename = "", bool showText = true)
         {
             Pilot = pilot;
+            this.showText = showText;
+            this.filename = filename;
+            needsLoadAttempt = true;
+        }
 
+        public override void Layout(RectangleF parentBounds)
+        {
+            if (needsLoadAttempt)
+            {
+                LoadProfile();
+                needsLoadAttempt = false;
+            }
+
+            base.Layout(parentBounds);
+        }
+
+        private void LoadProfile()
+        {
             insideOutBorderRelativeNode.ClearDisposeChildren();
 
-            if (pilot != null)
+            if (Pilot != null)
             {
                 if (showText)
-                    TextNode.Text = PickAThing(pilot);
+                    TextNode.Text = PickAThing(Pilot);
 
-                if (string.IsNullOrEmpty(filename) && !string.IsNullOrEmpty(pilot.PhotoPath))
+                if (string.IsNullOrEmpty(filename) && !string.IsNullOrEmpty(Pilot.PhotoPath))
                 {
-                    filename = pilot.PhotoPath;
+                    filename = Pilot.PhotoPath;
                 }
 
                 if (string.IsNullOrEmpty(filename))
@@ -108,12 +152,13 @@ namespace UI.Nodes
                 PilotPhoto = null;
                 TextNode.Text = "";
             }
-
-            RequestLayout();
         }
 
         private bool LoadFile(string filename)
         {
+            if (CompositorLayer == null)
+                return false;
+
             try
             {
                 PilotPhoto?.Dispose();
@@ -124,9 +169,15 @@ namespace UI.Nodes
                 FileInfo fileInfo = new FileInfo(repaired);
                 if (fileInfo.Exists)
                 {
-
                     string[] videoFileTypes = new[] { ".mp4", ".wmv", ".mkv" };
                     string[] imageFileTypes = new[] { ".png", ".jpg", ".jpeg" };
+
+                    string maskFilename = "";
+                    float maskSecondDrawAlpha = ApplicationProfileSettings.Instance.PilotProfileMaskAlpha;
+                    if (ApplicationProfileSettings.Instance.PilotProfileMask && Theme.Current != null && Theme.Current.PilotProfileMask != null)
+                    {
+                        maskFilename = Theme.Current.PilotProfileMask.TextureFilename;
+                    }
 
                     if (videoFileTypes.Contains(fileInfo.Extension))
                     {
@@ -144,7 +195,27 @@ namespace UI.Nodes
 
                         source.BounceRepeat = ApplicationProfileSettings.Instance.PilotProfileBoomerangRepeat;
 
-                        videoPlayer = new FileFrameNode(source);
+                        if (Pilot != null)
+                        {
+                            FlipMirroreds flipMirrored = FlipMirroreds.None;
+                            if (Pilot.VideoFlipped && Pilot.VideoMirrored)
+                                flipMirrored = FlipMirroreds.FlippedAndMirrored;
+                            else if (Pilot.VideoFlipped)
+                                flipMirrored = FlipMirroreds.Flipped;
+                            else if (Pilot.VideoMirrored)
+                                flipMirrored = FlipMirroreds.Mirrored;
+
+                            source.VideoConfig.FlipMirrored = flipMirrored;
+                        }
+
+                        if (string.IsNullOrEmpty(maskFilename))
+                        {
+                            videoPlayer = new FileFrameNode(source);
+                        }
+                        else
+                        {
+                            videoPlayer = new FileFrameMaskedNode(source, maskFilename, maskSecondDrawAlpha);
+                        }
 
                         videoPlayer.Repeat = true;
                         videoPlayer.Play();
@@ -154,7 +225,15 @@ namespace UI.Nodes
                     }
                     else if (imageFileTypes.Contains(fileInfo.Extension))
                     {
-                        PilotPhoto = new ImageNode(fileInfo.FullName);
+                        if (string.IsNullOrEmpty(maskFilename))
+                        {
+                            PilotPhoto = new ImageNode(fileInfo.FullName);
+                        }
+                        else
+                        {
+                            PilotPhoto = new ImageMaskedNode(fileInfo.FullName, maskFilename, maskSecondDrawAlpha);
+                        }
+
                         insideOutBorderRelativeNode.AddChild(PilotPhoto, 0);
                     }
 
@@ -193,6 +272,7 @@ namespace UI.Nodes
             return false;
         }
 
+
         private string PickAThing(Pilot pilot)
         {
             List<string> things = new List<string>();
@@ -230,6 +310,17 @@ namespace UI.Nodes
             {
                 videoPlayer.Seek(time);
             }
+        }
+
+        public override bool Contains(Point point)
+        {
+            if (!Visible) 
+                return false;
+
+            if (PilotPhoto == null) 
+                return false;
+
+            return PilotPhoto.Contains(point);
         }
     }
 }

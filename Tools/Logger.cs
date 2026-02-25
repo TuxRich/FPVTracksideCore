@@ -240,6 +240,26 @@ namespace Tools
             }
         }
 
+        public void LogStatic(params object[] targets)
+        {
+            if (!Enabled)
+                return;
+
+            Log(null, string.Join(", ", targets), LogType.Notice);
+        }
+
+        public void LogDebugStatic(params object[] targets)
+        {
+            LogDebugCall(null, targets);
+        }
+
+        public void LogDebugCall(object caller, params object[] targets)
+        {
+#if DEBUG
+            LogCall(caller, targets);
+#endif  
+        }
+
         public void LogStackTrace(object caller, params object[] targets)
         {
             if (!Enabled)
@@ -247,6 +267,24 @@ namespace Tools
 
             StackTrace stackTrace = new StackTrace(true);
             Log(caller, stackTrace.ToString(), string.Join(", ", targets), LogType.Error);
+        }
+
+        public void LogException(Exception exception)
+        {
+            LogException(null, null, exception);
+        }
+
+        public void LogException(string message, Exception exception)
+        {
+            LogException(null, message, exception);
+        }
+
+        public void LogException(object caller, string message, Exception exception)
+        {
+            if (!Enabled)
+                return;
+
+            Log(caller, message + ": " + exception.ToString(), null, LogType.Exception);
         }
 
         public void LogException(object caller, Exception exception)
@@ -386,7 +424,7 @@ namespace Tools
 
         public override string ToString()
         {
-            string output = DateTime.ToString("yyyy/MM/dd HH:mm:ss.FFF") + " " + LogName + " (" + Type.ToString() + ")";
+            string output = DateTime.ToString("yyyy/MM/dd HH:mm:ss.FFF") + " (" + Version + ") " + LogName.ToUpper() + " (" + Type.ToString() + ") ";
             if (Caller != null)
             {
                 output += " - " + Caller;
@@ -419,7 +457,7 @@ namespace Tools
 
         public void Log(Exception ex)
         {
-            LogItem logItem = new LogItem("Crash", "", ex.Message, ex, LogType.Exception, logVersion);
+            LogItem logItem = new LogItem("Crash", null, ex.Message, ex, LogType.Exception, logVersion);
 
             using (StreamWriter stream = new StreamWriter(file.FullName, true))
             {

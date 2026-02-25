@@ -12,9 +12,54 @@ namespace UI
 {
     public class TranslatorFactory
     {
+        public static IEnumerable<string> TranslatorNames()
+        {
+            foreach (Translator translator in Load())
+            {
+                yield return translator.Language;
+            }
+        }
+
+
         public static IEnumerable<Translator> Load()
         {
-            return Load(new FileInfo("Translations.xlsx"));
+            string filename = "Translations.xlsx";
+            FileInfo file = null;
+
+            // Try multiple locations
+            string[] searchPaths = new string[]
+            {
+                // Current directory
+                filename,
+                // Base directory (where executable is)
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, filename),
+                // Working directory (user data on Mac: ~/Library/Application Support/FPVTrackside)
+                Tools.IOTools.WorkingDirectory != null
+                    ? Path.Combine(Tools.IOTools.WorkingDirectory.FullName, filename)
+                    : null,
+                // Parent of base directory (for .app bundles)
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", filename),
+                // Resources folder in .app bundle
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "Resources", filename),
+            };
+
+            foreach (string path in searchPaths)
+            {
+                if (string.IsNullOrEmpty(path))
+                    continue;
+
+                file = new FileInfo(path);
+                if (file.Exists)
+                    break;
+            }
+
+            if (file == null || !file.Exists)
+            {
+                // Return empty if file not found
+                return Enumerable.Empty<Translator>();
+            }
+
+            return Load(file);
         }
 
         public static IEnumerable<Translator> Load(FileInfo excelFile, string sheetname = "Sheet1")

@@ -147,7 +147,7 @@ namespace Composition.Nodes
 
         public override bool OnTextInput(TextInputEventArgs inputEvent)
         {
-            if (AllowsUnicode)
+            try
             {
                 switch (inputEvent.Character)
                 {
@@ -156,14 +156,33 @@ namespace Composition.Nodes
                         break;
 
                     default:
-                        Text += inputEvent.Character;
+                        const int startOfVisibleChars = ' ';
+                        if (cursorIndex <= Text.Length && inputEvent.Character >= startOfVisibleChars)
+                        {
+                            string text = Text.Substring(0, cursorIndex);
+                            text += inputEvent.Character;
+                            text += Text.Substring(cursorIndex);
+
+                            if (AllowsUnicode)
+                            {
+                                Text = text.NoControlCharacters();
+                            }
+                            else
+                            {
+                                Text = text.AsciiOnly();
+                            }
+
+                            cursorIndex++;
+
+                            RequestRedraw();
+                            TextChanged?.Invoke(Text);
+                        }
                         break;
                 }
-
-                cursorIndex = Text.Length;
-
-                RequestRedraw();
-                TextChanged?.Invoke(Text);
+            }
+            catch (Exception ex)
+            {
+                Logger.UI.LogException(this, ex);
             }
 
             return base.OnTextInput(inputEvent);
@@ -171,97 +190,109 @@ namespace Composition.Nodes
 
         public override bool OnKeyboardInput(KeyboardInputEvent inputEvent)
         {
-            bool control = CompositorLayer.InputEventFactory.AreControlKeysDown();
-
-            if (Text == null)
-                Text = "";
-
-            if (inputEvent.ButtonState == ButtonStates.Pressed || inputEvent.ButtonState == ButtonStates.Repeat)
+            try
             {
-                int activeIndex = cursorIndex;
-                if (activeIndex > Text.Length)
+                bool control = CompositorLayer.InputEventFactory.AreAnyKeysDown(PlatformTools.CutCopyPasteModifierKeys);
+                if (Text == null)
+                    Text = "";
+
+                if (inputEvent.ButtonState == ButtonStates.Pressed || inputEvent.ButtonState == ButtonStates.Repeat)
                 {
-                    activeIndex = text.Length;
-                }
+                    int activeIndex = cursorIndex;
+                    if (activeIndex > Text.Length)
+                    {
+                        activeIndex = text.Length;
+                    }
 
-                string before = Text.Substring(0, activeIndex);
-                string after = Text.Substring(before.Length);
+                    string before = Text.Substring(0, activeIndex);
+                    string after = Text.Substring(before.Length);
 
-                string input = "";
-                char c = inputEvent.GetChar();
+                    string input = "";
+                    char c = inputEvent.GetChar();
 
-                if (control)
-                {
-                    if (inputEvent.Key == Keys.V)
+                    if (control && inputEvent.Key == Keys.V)
                     {
                         input = PlatformTools.Clipboard.GetText();
                     }
-                }
 
-                if (!string.IsNullOrEmpty(input))
-                {
-                    Text = before + input + after;
-                    cursorIndex = Text.Length;
-                }
-
-                switch (inputEvent.Key)
-                {
-                    case Keys.Back:
-                        if (before.Length > 0)
+                    if (!string.IsNullOrEmpty(input))
+                    {
+                        string text = before + input + after;
+                        if (AllowsUnicode)
                         {
-                            Text = before.Substring(0, before.Length - 1) + after;
-                            cursorIndex--;
+                            Text = text.NoControlCharacters();
                         }
-                        break;
-
-                    case Keys.Delete:
-                        if (after.Length > 0)
+                        else
                         {
-                            Text = before + after.Substring(1);
+                            Text = text.AsciiOnly();
                         }
-                        break;
-
-                    case Keys.Left:
-                        cursorIndex--;
-                        if (cursorIndex < 0) 
-                            cursorIndex = 0;
-                        break;
-
-                    case Keys.Right:
-                        cursorIndex++;
-                        if (cursorIndex > Text.Length) 
-                            cursorIndex = Text.Length;
-                        break;
-
-                    case Keys.Enter:
-                        OnReturn?.Invoke();
-                        HasFocus = false;
-                        break;
-
-                    case Keys.Tab:
-                        OnTab?.Invoke();
-                        HasFocus = false;
-                        break;
-
-                    case Keys.Home:
-                        cursorIndex = 0;
-                        break;
-
-                    case Keys.End:
                         cursorIndex = Text.Length;
-                        break;
+                    }
 
-                    case Keys.Up:
-                        AddValue(1);
-                        break;
+                    switch (inputEvent.Key)
+                    {
+                        case Keys.Back:
+                            if (before.Length > 0)
+                            {
+                                Text = before.Substring(0, before.Length - 1) + after;
+                                cursorIndex--;
+                            }
+                            break;
 
-                    case Keys.Down:
-                        AddValue(-1);
-                        break;
+                        case Keys.Delete:
+                            if (after.Length > 0)
+                            {
+                                Text = before + after.Substring(1);
+                            }
+                            break;
+
+                        case Keys.Left:
+                            cursorIndex--;
+                            if (cursorIndex < 0) 
+                                cursorIndex = 0;
+                            break;
+
+                        case Keys.Right:
+                            cursorIndex++;
+                            if (cursorIndex > Text.Length) 
+                                cursorIndex = Text.Length;
+                            break;
+
+                        case Keys.Enter:
+                            OnReturn?.Invoke();
+                            HasFocus = false;
+                            break;
+
+                        case Keys.Tab:
+                            OnTab?.Invoke();
+                            HasFocus = false;
+                            break;
+
+                        case Keys.Home:
+                            cursorIndex = 0;
+                            break;
+
+                        case Keys.End:
+                            cursorIndex = Text.Length;
+                            break;
+
+                        case Keys.Up:
+                            AddValue(1);
+                            break;
+
+                        case Keys.Down:
+                            AddValue(-1);
+                            break;
+                    }
+                    RequestRedraw();
+                    TextChanged?.Invoke(Text);
+                    return true;
                 }
-                RequestRedraw();
-                TextChanged?.Invoke(Text);
-                return true;
+
+            }
+            catch (Exception ex)
+            {
+                Logger.UI.LogException(this, ex);
             }
 
             return base.OnKeyboardInput(inputEvent);

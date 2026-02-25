@@ -1,4 +1,5 @@
-﻿using System;
+﻿
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -15,61 +16,36 @@ namespace RaceLib
         [Category("Editable Details")]
         public int RoundNumber { get; set; }
 
-        public enum RoundTypes
-        {
-            Round = 0,
-            Final,
-            DoubleElimination
-        }
 
         [Category("Editable Details")]
         public EventTypes EventType { get; set; }
 
         [Category("Editable Details")]
-        public RoundTypes RoundType { get; set; }
-        
-
-        [Category("Editable Details")]
         public bool Valid { get; set; }
-
-        [System.ComponentModel.Browsable(false)]
-        public PointSummary PointSummary { get; set; }
-
-        [System.ComponentModel.Browsable(false)]
-        public TimeSummary TimeSummary { get; set; }
-
-        [System.ComponentModel.Browsable(false)]
-        public bool PackCountAfterRound { get; set; }
-
+        
         [Category("Editable Details")]
-        public bool LapCountAfterRound { get; set; }
+        public DateTime ScheduledStart { get; set; }
+
 
         [Category("Advanced")]
         public int Order { get; set; }
 
         [Category("Advanced")]
-        public string SheetFormatFilename { get; set; }
-        public DateTime ScheduledStart { get; set; }
+        public string GameTypeName { get; set; }
 
-        [Category("Advanced")]
-        public bool HasSheetFormat
+        public Stage Stage { get; set; }
+
+        public StageTypes StageType
         {
             get
             {
-                return !string.IsNullOrEmpty(SheetFormatFilename);
-            }
-            set
-            {
-                if (value == false)
+                if (Stage == null)
                 {
-                    SheetFormatFilename = null; 
+                    return StageTypes.Default;
                 }
+                return Stage.StageType;
             }
         }
-
-        [Category("Advanced")]
-        public string GameTypeName { get; set; }
-
 
         public Round()
         {
@@ -77,11 +53,7 @@ namespace RaceLib
             Valid = true;
             EventType = EventTypes.Race;
             RoundNumber = 1;
-            RoundType = RoundTypes.Round;
-            LapCountAfterRound = false;
             Name = "";
-            PointSummary = null;
-            TimeSummary = null;
         }
 
         public override string ToString()
@@ -103,7 +75,7 @@ namespace RaceLib
                 return false;
             }
 
-            if (RoundType != RoundTypes.Round)
+            if (StageType != StageTypes.Default)
             {
                 return false;
             }
@@ -114,45 +86,6 @@ namespace RaceLib
         public string ToStringShort()
         {
             return EventType.ToString().Substring(0, 1) + RoundNumber;
-        }
-    }
-
-    public class PointSummary
-    {
-        public bool RoundPositionRollover { get; set; }
-
-        public bool DropWorstRound { get; set; }
-
-        public PointSummary()
-        {
-            RoundPositionRollover = false;
-            DropWorstRound = true;
-        }
-
-        public PointSummary(PointsSettings pointsSettings)
-        {
-            RoundPositionRollover = pointsSettings.RoundPositionRollover;
-            DropWorstRound = pointsSettings.DropWorstRound;
-        }
-    }
-
-    public class TimeSummary
-    {
-        public enum TimeSummaryTypes
-        {
-            PB,
-            EventLap,
-            RaceTime
-        }
-
-        public bool IncludeAllRounds { get; set; }
-
-        public TimeSummaryTypes TimeSummaryType { get; set; }
-
-        public TimeSummary()
-        {
-            TimeSummaryType = TimeSummaryTypes.PB;
-            IncludeAllRounds = false;
         }
     }
 }

@@ -76,6 +76,7 @@ namespace UI.Nodes
         public PilotEditor(EventManager eventManager, IEnumerable<Pilot> toEdit)
             : base(toEdit, false, true, false)
         {
+            AllowUnicode = true;
             this.eventManager = eventManager;
             pilotChannels = new List<PilotChannel>();
 
@@ -129,6 +130,14 @@ namespace UI.Nodes
 
         }
     }
+    public class TimeZonePropertyNode<T> : ListPropertyNode<T>
+    {
+        public TimeZonePropertyNode(T obj, PropertyInfo pi, Color background, Color textColor, Color hover)
+            : base(obj, pi, background, textColor, hover)
+        {
+            SetOptions(RaceLib.TimeZone.GetIanaTimeZones().Order());
+        }
+    }
 
     public class SoundEditor : ObjectEditorNode<Sound.Sound>
     {
@@ -139,6 +148,8 @@ namespace UI.Nodes
         public SoundEditor(SoundManager soundManager)
             : base(soundManager.Sounds, false, true, false)
         {
+            AllowUnicode = true;
+
             TextButtonNode speakButton = new TextButtonNode("Play", ButtonBackground, ButtonHover, TextColor);
             speakButton.OnClick += (mie) =>
             {
@@ -194,7 +205,8 @@ namespace UI.Nodes
             };
 
             variables = new Node();
-            right.AddChild(variables);
+            centralDock.Bottom.AddChild(variables);
+            centralDock.Bottom.SetFixedSize(350);
 
             TextNode s = new TextNode("Variables", TextColor);
             s.Style.Bold = true;
@@ -291,9 +303,11 @@ namespace UI.Nodes
             Text = "Channel Settings";
             if (showCheckbox)
             {
-                check = new TextCheckBoxNode("Save as default for new Events", TextColor, false);
+                check = new TextCheckBoxNode("Save as default\nfor new Events", TextColor, false);
                 check.RelativeBounds = new RectangleF(0, 0.97f, 0.8f, 0.025f);
-                left.AddChild(check);
+                buttonContainer.AddChild(check, 0);
+
+                AlignHorizontally(0.05f, buttonContainer.Children);
             }
         }
 
@@ -448,6 +462,11 @@ namespace UI.Nodes
                 return new ComPortPropertyNode<ApplicationProfileSettings>(obj, pi, ButtonBackground, TextColor, ButtonHover);
             }
 
+            if (pi.Name == "Language")
+            {
+                return new LanguagePropertyNode(obj, pi, ButtonBackground, TextColor, ButtonHover);
+            }
+
             return base.CreatePropertyNode(obj, pi);
         }
 
@@ -467,6 +486,15 @@ namespace UI.Nodes
                 base.ShowMouseMenu();
             }
         }
+        private class LanguagePropertyNode : ListPropertyNode<ApplicationProfileSettings>
+        {
+            public LanguagePropertyNode(ApplicationProfileSettings obj, PropertyInfo pi, Color textBackground, Color textColor, Color hover)
+                : base(obj, pi, textBackground, textColor, hover)
+            {
+                SetOptions(TranslatorFactory.TranslatorNames());
+            }
+        }
+
     }
 
     class KeyboardShortcutsEditor : ObjectEditorNode<KeyboardShortcuts>
@@ -474,6 +502,7 @@ namespace UI.Nodes
         public KeyboardShortcutsEditor(KeyboardShortcuts toEdit)
             : base(toEdit, false, true, false)
         {
+
         }
     }
 
@@ -610,17 +639,13 @@ namespace UI.Nodes
         public EventManager EventManager { get; private set; }
         public Round CallingRound { get; private set; }
 
-        public CustomRoundEditor(EventManager ev, Round callingRound)
+        public CustomRoundEditor(EventManager ev, RoundPlan roundPlan)
         {
-            CallingRound = callingRound;
             EventManager = ev;
-
-            RoundPlan customRoundDescriptor = new RoundPlan(ev, callingRound);
-            SetObject(customRoundDescriptor);
+           
+            SetObject(roundPlan);
 
             Scale(0.8f);
-
-            SetHeadingButtonsHeight(0.05f, 0.05f);
             heading.Text = "Create Custom Round";
             CheckVisible();
         }
@@ -679,7 +704,7 @@ namespace UI.Nodes
             string name = propertyNode.PropertyInfo.Name;
             if (name == "ChannelChange")
             {
-                if (obj.PilotSeeding == RoundPlan.PilotOrderingEnum.MinimisePreviouslyFlown)
+                if (obj.PilotSeeding == PilotOrdering.MinimisePreviouslyFlown)
                 {
                     propertyNode.Visible = true;
                 }
@@ -742,8 +767,7 @@ namespace UI.Nodes
     {
         public OBSRemoteControlManager.OBSRemoteControlConfig Config { get; private set; }
 
-        private OBSRemoteControlCommonEditor commonProperties;
-        private Node commonPropertiesBackground;
+        private OBSRemoteControlCommonEditor connectionProperties;
         private TextNode triggersHeading;
 
         public OBSRemoteControlEditor(OBSRemoteControlManager.OBSRemoteControlConfig config)
@@ -751,24 +775,22 @@ namespace UI.Nodes
             Scale(0.8f, 1f);
             Config = config;
 
-            commonPropertiesBackground = new Node();
-            root.AddChild(commonPropertiesBackground);
+            heading.Dispose();
 
-            commonProperties = new OBSRemoteControlCommonEditor(Theme.Current.Editor.Foreground.XNA, Theme.Current.Hover.XNA, Theme.Current.Editor.Text.XNA, Theme.Current.ScrollBar.XNA, false);
-            commonProperties.SetObject(Config, false, false);
-            commonPropertiesBackground.AddChild(commonProperties);
-            commonProperties.ProfileChanged += CommonProperties_ProfileChanged;
+            connectionProperties = new OBSRemoteControlCommonEditor(Theme.Current.Editor.Foreground.XNA, Theme.Current.Hover.XNA, Theme.Current.Editor.Text.XNA, Theme.Current.ScrollBar.XNA, false);
+            connectionProperties.SetObject(Config, false, false);
+            connectionProperties.ProfileChanged += CommonProperties_ProfileChanged;
+            mainDock.Top.AddChild(connectionProperties);
 
-            commonPropertiesBackground.RelativeBounds = new RectangleF(objectProperties.RelativeBounds.X, objectProperties.RelativeBounds.Y, objectProperties.RelativeBounds.Width, 0.32f);
-            commonPropertiesBackground.Scale(0.5f, 1);
+            mainDock.Top.SetFixedSize(200);
 
             triggersHeading = new TextNode("Triggers", Theme.Current.Editor.Text.XNA);
-            triggersHeading.RelativeBounds = new RectangleF(objectProperties.RelativeBounds.X, commonPropertiesBackground.RelativeBounds.Bottom + 0.02f, objectProperties.RelativeBounds.Width, 0.03f);
-            root.AddChild(triggersHeading);
-
+            centralDock.Top.AddChild(triggersHeading);
             SetHeadingText("OBS Remote Control");
 
             SetObjects(config.RemoteControlEvents, true, true);
+
+            itemName.Dispose();
         }
 
         private void CommonProperties_ProfileChanged()
@@ -793,9 +815,6 @@ namespace UI.Nodes
         {
             itemName.Visible = false;
             base.SetObjects(toEdit, addRemove, cancelButton);
-
-            container.Translate(0, triggersHeading.RelativeBounds.Bottom);
-            container.AddSize(0, -triggersHeading.RelativeBounds.Bottom);
         }
 
         protected override PropertyNode<OBSRemoteControlManager.OBSRemoteControlEvent> CreatePropertyNode(OBSRemoteControlManager.OBSRemoteControlEvent obj, PropertyInfo pi)
@@ -826,7 +845,7 @@ namespace UI.Nodes
 
             public OBSRemoteControlCommonEditor(Color buttonBackground, Color buttonHover, Color textColor, Color scrollColor, bool hasButtons = true) : base(buttonBackground, buttonHover, textColor, scrollColor, hasButtons)
             {
-                SetHeadingText("");
+                SetHeadingText("OBS Remote Control");
             }
 
             private void Profile_onChanged(object obj)

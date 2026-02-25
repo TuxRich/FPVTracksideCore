@@ -3,6 +3,7 @@ using Composition.Text;
 using Microsoft.Xna.Framework;
 using UI;
 using RaceLib;
+using ImageServer;
 
 namespace FPVMacsideCore
 {
@@ -32,6 +33,9 @@ namespace FPVMacsideCore
 
         protected override void LoadContent()
         {
+            // Pre-load FFmpeg bindings in background to avoid delays when entering replay mode
+            FfmpegMediaPlatform.FfmpegGlobalInitializer.Initialize();
+
             Theme.Initialise(GraphicsDevice, PlatformTools.WorkingDirectory, "Dark");
             DirectoryInfo eventDir = new DirectoryInfo(ApplicationProfileSettings.Instance.EventStorageLocation);
             DatabaseFactory.Init(new DB.DatabaseFactory(Data, eventDir));
@@ -39,6 +43,8 @@ namespace FPVMacsideCore
 
             base.LoadContent();
             BitmapFontLibrary.Init(PlatformTools.WorkingDirectory);
+
+            VideoFrameWorks.Available.Add(new FfmpegMediaPlatform.FfmpegMediaFramework());
         }
     }
 

@@ -117,11 +117,11 @@ namespace RaceLib
 
         public Sector[] Sectors { get; set; }
 
-        private static string dateFormat = "d MMM";
-
         public DateTime[] Flags { get; set; }
 
         public string GameTypeName { get; set; }
+
+        public string TimeZone { get; set; }
 
         public Event()
         {
@@ -139,7 +139,7 @@ namespace RaceLib
             EventType = EventTypes.Race;
             PackLimit = 0;
             Start = DateTime.Today;
-            Name = "New Event (" + Start.ToString(dateFormat) + ")";
+            Name = "New Event";
             MinStartDelay = TimeSpan.FromSeconds(0.5f);
             MaxStartDelay = TimeSpan.FromSeconds(5);
 
@@ -149,9 +149,10 @@ namespace RaceLib
             Start = DateTime.Today;
             VisibleOnline = true;
             Sectors = new Sector[0];
+            TimeZone = RaceLib.TimeZone.GetIanaTimeZoneLocal();
         }
 
-        public Event Clone()
+        public Event Clone(string name)
         {
             Event newEvent = new Event();
             newEvent.ID = Guid.NewGuid();
@@ -169,20 +170,12 @@ namespace RaceLib
             newEvent.RaceLength = this.RaceLength;
             newEvent.EventType = this.EventType;
 
-            newEvent.Name = this.Name;
+            newEvent.Name = name;
             newEvent.Start = DateTime.Today;
-
-            try
-            {
-                newEvent.Name = Regex.Replace(newEvent.Name, @"\([A-z0-9 ]*\)", "");
-            }
-            catch
-            {
-            }
-
-            newEvent.Name = newEvent.Name + " (" +  Start.ToString(dateFormat) + ")";
-
-            newEvent.PilotChannels = this.PilotChannels.ToList();
+            newEvent.End = DateTime.Today + TimeSpan.FromDays(1);
+            newEvent.TimeZone = TimeZone;
+            
+            newEvent.PilotChannels = this.PilotChannels.Select(pc => pc.Clone()).ToList();
             newEvent.Channels = this.Channels.ToArray();
 
             newEvent.MinLapTime = this.MinLapTime;
@@ -249,6 +242,8 @@ namespace RaceLib
         [ReadOnly(true)]
         public string ChannelsString { get; set; }
 
+        [Category("Event Info")]
+        public string TimeZone { get; set; }
 
         [Category("Event Info")]
         [DisplayName("MultiGP Global Qualifier")]
@@ -309,7 +304,7 @@ namespace RaceLib
         [Category("Cloud")]
         [DisplayName("Sync with MultiGP")]
         public bool SyncWithMultiGP { get; set; }
-        
+
         [System.ComponentModel.Browsable(false)]
         public int ExternalID { get; set; }
         

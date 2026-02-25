@@ -61,13 +61,16 @@ namespace FPVMacsideCore
 
         public override bool ThreadedDrawing { get { return false; } }
 
+        public override Microsoft.Xna.Framework.Input.Keys[] CutCopyPasteModifierKeys => [Microsoft.Xna.Framework.Input.Keys.LeftWindows, Microsoft.Xna.Framework.Input.Keys.RightWindows];
+
+
         public MacPlatformTools()
         {
             Console.WriteLine("Mac Platform Start");
             Console.WriteLine("Working Dir " + Directory.GetCurrentDirectory());
 
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            workingDirectory = new DirectoryInfo(home + "/Documents/FPVTrackside");
+            workingDirectory = new DirectoryInfo(Path.Combine(home, "Documents", "FPVTrackside"));
 
             if (!WorkingDirectory.Exists)
             {
@@ -89,18 +92,13 @@ namespace FPVMacsideCore
 
             todo = new List<Action>();
             maclipboard = new Maclipboard();
-
-            VideoFrameWorks.Available = new VideoFrameWork[]
-            {
-                new FfmpegMediaPlatform.FfmpegMediaFramework()
-            };
         }
 
         private void CopyToHomeDir(DirectoryInfo oldWorkDir)
         {
             Console.WriteLine("Source " + oldWorkDir.FullName);
 
-
+            // Copy directories
             string[] toCopy = new string[] { "themes", "img", "bitmapfonts", "httpfiles", "formats", "sounds", "Content" };
             foreach (string copy in toCopy)
             {
@@ -125,12 +123,37 @@ namespace FPVMacsideCore
                     Logger.AllLog.LogException(this, e);
                 }
             }
+
+            // Copy individual files (like Translations.xlsx)
+            string[] filesToCopy = new string[] { "Translations.xlsx" };
+            foreach (string fileName in filesToCopy)
+            {
+                try
+                {
+                    FileInfo sourceFile = new FileInfo(Path.Combine(oldWorkDir.FullName, fileName));
+                    FileInfo destFile = new FileInfo(Path.Combine(WorkingDirectory.FullName, fileName));
+
+                    if (sourceFile.Exists)
+                    {
+                        // Copy if destination doesn't exist or source is newer
+                        if (!destFile.Exists || sourceFile.LastWriteTime > destFile.LastWriteTime)
+                        {
+                            sourceFile.CopyTo(destFile.FullName, true);
+                            Console.WriteLine($"Copied {fileName} to working directory");
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    Logger.AllLog.LogException(this, e);
+                }
+            }
         }
 
 
         public override ITextRenderer CreateTextRenderer()
         {
-            return new TextRenderBMP();
+            return new TextRenderSkia();
         }
 
         public override void Invoke(Action value)

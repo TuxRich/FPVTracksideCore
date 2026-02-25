@@ -13,9 +13,11 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Tools;
 using UI.Nodes;
+using UI.Nodes.Rounds;
 
 namespace UI.Video
 {
@@ -52,6 +54,9 @@ namespace UI.Video
             locker = new object();
             Profile = profile;
 
+            centralDock.Top.SetFixedSize(400);
+            itemName.Remove();
+
             VideoManager = videoManager;
             VideoManager.OnStart += VideoManager_OnStart;
             EventManager = em;
@@ -85,20 +90,27 @@ namespace UI.Video
                 VideoManager = null;
             }
 
+            itemName?.Dispose();
+
             base.Dispose();
         }
 
         protected override void AddOnClick(MouseInputEvent mie)
         {
-            MouseMenu mouseMenu = new MouseMenu(this);
-            mouseMenu.TopToBottom = false;
-
-            VideoConfig[] vcs = VideoManager.GetAvailableVideoSources().OrderBy(vc => vc.DeviceName).ToArray();
-            foreach (VideoConfig source in vcs)
+            LoadingLayer ll = GetLayer<LoadingLayer>();
+            ll.WorkQueue.Enqueue("Reading Devices", () =>
             {
-                if (!Objects.Any(r => r.Equals(source)))
+                MouseMenu mouseMenu = new MouseMenu(this);
+                mouseMenu.TopToBottom = false;
+
+                IEnumerable<VideoConfig> all = VideoManager.GetAvailableVideoSources();
+
+                VideoConfig[] notInUse = all.Where(r => !r.Matches(Objects)).OrderBy(vc => vc.DeviceName).ToArray();
+                        
+                IEnumerable<VideoConfig> combined = notInUse.CombineVideoSources();
+                foreach (VideoConfig source in combined)
                 {
-                    string sourceAsString = source.ToString();
+                    string sourceAsString = source.ToStringUnique(combined);
                     if (!string.IsNullOrWhiteSpace(sourceAsString))
                     {
                         if (VideoManager.ValidDevice(source))
@@ -111,16 +123,66 @@ namespace UI.Video
                         }
                     }
                 }
-            }
+            
+                mouseMenu.AddItem("File", AddVideoFile);
+                //mouseMenu.AddItem("RTSP URL", AddURL);
 
-            mouseMenu.AddItem("File", AddVideoFile);
-            //mouseMenu.AddItem("RTSP URL", AddURL);
-            mouseMenu.Show(addButton);
+                // Group by framework.
+                var grouped = notInUse.GroupBy(o => o.FrameWork);
+                if (grouped.Any())
+                {
+                    MouseMenu by = mouseMenu.AddSubmenu("By Framework");
+                    foreach (var group in grouped)
+                    {
+                        MouseMenu frameworkSubMenu = by.AddSubmenu(group.Key.ToString());
+                        foreach (VideoConfig source in group)
+                        {
+                            string sourceAsString = source.ToString();
+                            if (!string.IsNullOrWhiteSpace(sourceAsString))
+                            {
+                                if (VideoManager.ValidDevice(source))
+                                {
+                                    frameworkSubMenu.AddItem(sourceAsString, () => { AddNew(source); });
+                                }
+                                else
+                                {
+                                    frameworkSubMenu.AddDisabledItem(sourceAsString);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                IEnumerable<FrameWork> needInstall = VideoManager.GetNeedsInstall();
+                if (needInstall.Any())
+                {
+                    mouseMenu.AddBlank();
+                    MouseMenu install = mouseMenu.AddSubmenu("Install");
+
+                    foreach (FrameWork toInstall in needInstall)
+                    {
+                        FrameWork local = toInstall;
+                        install.AddItem("Install " + local, () => { Install(local); });
+                    }
+                }
+
+                mouseMenu.Show(addButton);
+            });
+        }
+
+        private void Install(FrameWork f)
+        {
+            PopupLayer pl = GetLayer<PopupLayer>();
+            pl.PopupConfirmation("This will attempt to install " + f + ". You may need to accept T&C's in the console window that will appear.", () => 
+            { 
+                VideoManager.Install(f);
+                pl.PopupMessage("Please restart FPVTrackside for the installation of " + f + " to take effect.");
+            });
         }
 
         private void AddVideoFile()
         {
-            string filename = PlatformTools.OpenFileDialog("Open WMV / JPG", "Video or Image files|*.wmv;*.jpg");
+            string filename = PlatformTools.OpenFileDialog("Open Video / Image", "Video or Image files|*.wmv;*.mp4;*.mkv;*.jpg");
             if (!string.IsNullOrWhiteSpace(filename))
             {
                 VideoConfig vs = new VideoConfig();
@@ -212,7 +274,7 @@ namespace UI.Video
             if (preview == null)
             {
                 preview = new ColorNode(Theme.Current.Editor.Foreground.XNA);
-                right.AddChild(preview);
+                centralDock.Top.AddChild(preview);
             }
 
             if (physicalLayoutContainer == null)
@@ -222,7 +284,7 @@ namespace UI.Video
                 ColorNode background = new ColorNode(Theme.Current.Editor.Foreground.XNA);
                 physicalLayoutContainer.AddChild(background);
 
-                right.AddChild(physicalLayoutContainer);
+                centralDock.Top.AddChild(physicalLayoutContainer);
 
                 physicalLayout = new ColorNode(Theme.Current.Editor.Text.XNA);
                 physicalLayout.Scale(0.3f);
@@ -231,14 +293,6 @@ namespace UI.Video
 
 
             base.SetObjects(toEdit, addRemove, cancelButton);
-
-            preview.RelativeBounds = new RectangleF(objectProperties.RelativeBounds.X, objectProperties.RelativeBounds.Y, objectProperties.RelativeBounds.Width, 0.46f);
-
-            objectProperties.Translate(0, preview.RelativeBounds.Height);
-            objectProperties.AddSize(0, -preview.RelativeBounds.Height);
-
-            float top = 0.002f;
-
             physicalLayoutContainer.RelativeBounds = new RectangleF(1.1f, preview.RelativeBounds.Y, 0.3f, preview.RelativeBounds.Height);
         }
 
@@ -295,6 +349,12 @@ namespace UI.Video
             if (propertyNode == null)
                 return;
 
+            ConditionalFrameworksAttribute conditionalFramework = propertyNode.PropertyInfo.GetCustomAttribute<ConditionalFrameworksAttribute>();
+            if (conditionalFramework != null)
+            {
+                propertyNode.Visible = conditionalFramework.Has(obj.FrameWork);
+            }
+
             string name = propertyNode.PropertyInfo.Name;
             if (name.Contains("Splits") && name != "Splits" && obj.Splits != Splits.Custom)
             {
@@ -306,15 +366,19 @@ namespace UI.Video
         {
             if (VideoManager != null && Selected != null)
             {
-                VideoManager.CreateFrameSource(new VideoConfig[] { Selected }, (fs) =>
+                LoadingLayer ll = GetLayer<LoadingLayer>();
+                ll.WorkQueue.Enqueue("Closing Device(s)", VideoManager.ClearRestart);
+                ll.WorkQueue.Enqueue("Opening " + Selected.DeviceName, () => 
                 {
-                    if (mapperNode != null)
+                    VideoManager.CreateFrameSource(new VideoConfig[] { Selected }, (fs) =>
                     {
-                        mapperNode.MakeTable();
-                    }
+                        if (mapperNode != null)
+                        {
+                            mapperNode.MakeTable();
+                        }
+                    });
+                    InitMapperNode(Selected);
                 });
-
-                InitMapperNode(Selected);
             }
         }
 
@@ -404,6 +468,8 @@ namespace UI.Video
 
             private bool rebootRequired;
 
+            private AutoResetEvent mutex;
+
             public ModePropertyNode(VideoSourceEditor vse, VideoConfig obj, PropertyInfo pi, Color background, Color textColor, Color hoverColor)
                 : base(obj, pi, background, textColor, hoverColor)
             {
@@ -411,11 +477,21 @@ namespace UI.Video
                 modes = new Mode[0];
 
                 rebootRequired = false;
+                mutex = new AutoResetEvent(false);
+            }
+
+            public override void Dispose()
+            {
+                mutex?.Dispose();
+                mutex = null;
+
+                base.Dispose();
             }
 
             private void AcceptModes(VideoManager.ModesResult result)
             {
-                modes = TrimModes(result.Modes).ToArray();
+                modes = TrimModes(result.Modes).DistinctModes().ToArray();
+
                 if (result.RebootRequired)
                 {
                     GetLayer<PopupLayer>().PopupMessage("Please reboot capture device: " + Object.DeviceName);
@@ -427,6 +503,8 @@ namespace UI.Video
                 }
 
                 SetOptions(modes);
+
+                mutex.Set();
                 ShowMouseMenu();
             }
 
@@ -434,16 +512,19 @@ namespace UI.Video
             {
                 if (mouseInputEvent.Button == MouseButtons.Left && mouseInputEvent.ButtonState == ButtonStates.Released)
                 {
-                    bool forceAllModes = Keyboard.GetState().IsKeyDown(Keys.LeftControl) || Keyboard.GetState().IsKeyDown(Keys.RightControl);
-                    if (forceAllModes)
+                    if (rebootRequired || !modes.Any())
                     {
-                        // Get ALL the modes form the device
-                        vse.VideoManager.GetModes(Object, true, AcceptModes);
-                    }
-                    else if (rebootRequired || !modes.Any())
-                    {
+                        LoadingLayer ll = GetLayer<LoadingLayer>();
+
+                        ll.WorkQueue.Enqueue("Reading modes from Device", () => 
+                        {
+                            mutex.WaitOne(20000); 
+                        });
+
+                        vse.VideoManager.ClearRestart();
+
                         // Get the normal modes form the device
-                        vse.VideoManager.GetModes(Object, false, AcceptModes);
+                        vse.VideoManager.GetModes(Object, true, AcceptModes);
                     }
                     else
                     {
@@ -459,13 +540,13 @@ namespace UI.Video
 
             private void SetOptions(Mode[] ms)
             {
-                IEnumerable<Mode> ordered = ms.OrderByDescending(m => m.FrameWork)
-                                                     .ThenByDescending(m => m.Width)
-                                                     .ThenByDescending(m => m.Height)
-                                                     .ThenByDescending(m => m.FrameRate)
-                                                     .ThenByDescending(m => m.Format);
+                IEnumerable<Mode> ordered = ms.OrderByDescending(m => m.Width)
+                                                .ThenByDescending(m => m.Height)
+                                                .ThenByDescending(m => Math.Round(m.FrameRate, 0))
+                                                .ThenBy(m => VideoFrameWorks.IndexOf(m.FrameWork))
+                                                .ThenByDescending(m => m.ToString());
 
-                if (ms.Any())
+                if (ordered.Any())
                 {
                     Options = ordered.OfType<object>().ToList();
                 }
@@ -1073,6 +1154,15 @@ namespace UI.Video
             return base.OnMouseInput(mouseInputEvent);
         }
 
+        public override Rectangle? CanDrop(MouseInputEvent finalInputEvent, Node node)
+        {
+            ChannelVideoMapNode other = node as ChannelVideoMapNode;
+            if (other != null)
+                return Bounds;
+
+            return base.CanDrop(finalInputEvent, node);
+        }
+
         public override bool OnDrop(MouseInputEvent finalInputEvent, Node node)
         {
             ChannelVideoMapNode other = node as ChannelVideoMapNode;
@@ -1120,7 +1210,6 @@ namespace UI.Video
         {
             heading.Text = "Camera Display Editor";
             Scale(0.5f, 0.5f);
-            SetButtonsHeight(0.1f);
         }
     }
 

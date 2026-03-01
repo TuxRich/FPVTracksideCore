@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -13,6 +13,22 @@ namespace Tools
     public static class IOTools
     {
         public static DirectoryInfo WorkingDirectory { get; set; }
+
+        private static readonly Dictionary<Type, XmlSerializer> xmlSerializerCache = new Dictionary<Type, XmlSerializer>();
+
+        private static XmlSerializer GetXmlSerializer<T>()
+        {
+            Type arrayType = typeof(T[]);
+            lock (xmlSerializerCache)
+            {
+                if (!xmlSerializerCache.TryGetValue(arrayType, out XmlSerializer serializer))
+                {
+                    serializer = new XmlSerializer(arrayType);
+                    xmlSerializerCache[arrayType] = serializer;
+                }
+                return serializer;
+            }
+        }
 
         public static T[] Read<T>(Profile profile, string filename) where T : new()
         {
@@ -107,7 +123,7 @@ namespace Tools
 
                 if (ext == ".xml")
                 {
-                    XmlSerializer serializer = new XmlSerializer(typeof(T[]));
+                    XmlSerializer serializer = GetXmlSerializer<T>();
                     using (TextReader reader = new StringReader(contents))
                     {
                         return (T[])serializer.Deserialize(reader);
@@ -157,7 +173,7 @@ namespace Tools
 
                     if (file.Extension.ToLower() == ".xml")
                     {
-                        XmlSerializer serializer = new XmlSerializer(typeof(T[]));
+                        XmlSerializer serializer = GetXmlSerializer<T>();
                         using (TextWriter writer = new StreamWriter(file.FullName))
                         {
                             serializer.Serialize(writer, items);

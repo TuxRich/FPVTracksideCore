@@ -1,4 +1,4 @@
-﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework;
 using RaceLib.Format;
 using System;
 using System.Collections.Generic;
@@ -1043,19 +1043,15 @@ namespace RaceLib
                             race.TargetLaps = EventManager.Event.Laps;
                         }
 
+                        Dictionary<Guid, Detection> detectionMap = race.Detections.ToDictionary(d => d.ID);
+
                         foreach (Lap lap in race.Laps)
                         {
-                            // When loading, we need to set the race object reference onto each Lap for performance quick access reasons.
                             lap.Race = race;
 
-                            // Same with detections...
-                            if (lap.Detection != null)
+                            if (lap.Detection != null && detectionMap.TryGetValue(lap.Detection.ID, out Detection d))
                             {
-                                Detection d = race.Detections.FirstOrDefault(da => da.ID == lap.Detection.ID);
-                                if (d != null)
-                                {
-                                    lap.Detection = d;
-                                }
+                                lap.Detection = d;
                             }
                         }
                     }

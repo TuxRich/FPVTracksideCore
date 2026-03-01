@@ -1,4 +1,4 @@
-﻿using ImageServer;
+using ImageServer;
 using RaceLib;
 using System;
 using System.Collections.Generic;
@@ -544,6 +544,8 @@ namespace UI.Video
         public IEnumerable<VideoConfig> GetRecordings(Race race)
         {
             DirectoryInfo raceDirectory = new DirectoryInfo(Path.Combine(EventDirectory.FullName, race.ID.ToString()));
+            Logger.VideoLog.Log(this, "GetRecordings", "Looking in: " + raceDirectory.FullName + " Exists: " + raceDirectory.Exists);
+
             if (raceDirectory.Exists)
             {
                 foreach (FileInfo file in raceDirectory.GetFiles("*.recordinfo.xml"))
@@ -562,18 +564,46 @@ namespace UI.Video
                     {
                         // Extract just the filename, handling both Windows and Mac path separators
                         string filename = videoInfo.FilePath;
+
+                        // First try the stored path directly
+                        if (File.Exists(filename))
+                        {
+                            videoInfo.FilePath = Path.GetFullPath(filename);
+                            Logger.VideoLog.Log(this, "GetRecordings", "Found video (direct): " + videoInfo.FilePath);
+                            yield return videoInfo.GetVideoConfig();
+                            continue;
+                        }
+
+                        // Try resolving relative to working directory
+                        if (!Path.IsPathRooted(filename) && IOTools.WorkingDirectory != null)
+                        {
+                            string fromWorkDir = Path.Combine(IOTools.WorkingDirectory.FullName, filename);
+                            if (File.Exists(fromWorkDir))
+                            {
+                                videoInfo.FilePath = fromWorkDir;
+                                Logger.VideoLog.Log(this, "GetRecordings", "Found video (workdir): " + videoInfo.FilePath);
+                                yield return videoInfo.GetVideoConfig();
+                                continue;
+                            }
+                        }
+
+                        // Fall back to just the filename in the race directory
                         int lastSlash = Math.Max(filename.LastIndexOf('/'), filename.LastIndexOf('\\'));
                         if (lastSlash >= 0)
                         {
                             filename = filename.Substring(lastSlash + 1);
                         }
 
-                        // The video file should be in the race directory
                         string resolvedPath = Path.Combine(raceDirectory.FullName, filename);
                         if (File.Exists(resolvedPath))
                         {
                             videoInfo.FilePath = resolvedPath;
+                            Logger.VideoLog.Log(this, "GetRecordings", "Found video (racedir): " + videoInfo.FilePath);
                             yield return videoInfo.GetVideoConfig();
+                        }
+                        else
+                        {
+                            Logger.VideoLog.Log(this, "GetRecordings", "Video NOT found. Stored: " + videoInfo.FilePath + " Tried: " + resolvedPath);
                         }
                     }
                 }

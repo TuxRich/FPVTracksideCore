@@ -1,4 +1,4 @@
-﻿using Composition.Input;
+using Composition.Input;
 using Composition.Layers;
 using Composition.Nodes;
 using ExternalData;
@@ -98,7 +98,12 @@ namespace UI
                 Logger.UI.LogException(this, ex);
             }
 
-            DirectoryInfo eventDirectory = new DirectoryInfo(Path.Combine(ApplicationProfileSettings.Instance.EventStorageLocation, eventManager.Event.ID.ToString()));
+            string eventsPath = ApplicationProfileSettings.Instance.EventStorageLocation;
+            if (!Path.IsPathRooted(eventsPath) && IOTools.WorkingDirectory != null)
+            {
+                eventsPath = Path.Combine(IOTools.WorkingDirectory.FullName, eventsPath);
+            }
+            DirectoryInfo eventDirectory = new DirectoryInfo(Path.Combine(eventsPath, eventManager.Event.ID.ToString()));
 
             workQueueStartStopRace = new WorkQueue("Event Layer - Start Stop Race");
 

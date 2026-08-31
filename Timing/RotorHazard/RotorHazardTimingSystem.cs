@@ -30,7 +30,7 @@ namespace Timing.RotorHazard
         }
     }
 
-    public class RotorHazardTimingSystem : ITimingSystemWithRSSI
+    public class RotorHazardTimingSystem : ITimingSystemWithRSSI, IRemoteMarshalUpdatable, IEventAware
     {
 
         private bool connected;
@@ -139,6 +139,37 @@ namespace Timing.RotorHazard
 
         public ServerInfo ServerInfo { get; private set; }
 
+        // The Connector-FPVTrackSide plugin version that first shipped marshalling support
+        // (ts_race_marshal_waveform/ts_race_marshal_update/ts_event_info) - bump alongside
+        // manifest.json's "version" whenever a plugin-side feature needs gating like this.
+        private const string MarshalMinimumPluginVersion = "1.2.0";
+
+        public bool MarshalSupported
+        {
+            get { return VersionAtLeast(ServerInfo.plugin_version, MarshalMinimumPluginVersion); }
+        }
+
+        // Tolerant dotted-version comparison (e.g. "1.2.0" >= "1.2.0") - strips anything from a
+        // '-' onward first, since RH's own release_version can carry a "-beta.1"-style suffix
+        // System.Version can't parse; not needed for our own plugin_version today (plain
+        // major.minor.patch), but keeps this safe to reuse for RH-core-version gating later.
+        // NOTE: must be fully qualified as System.Version - this namespace already has its own
+        // (unrelated) Version struct in Structures.cs, which shadows the unqualified name.
+        private static bool VersionAtLeast(string actual, string minimum)
+        {
+            if (string.IsNullOrEmpty(actual))
+                return false;
+
+            string actualCore = actual.Split('-')[0];
+            string minimumCore = minimum.Split('-')[0];
+
+            if (System.Version.TryParse(actualCore, out System.Version actualVersion) && System.Version.TryParse(minimumCore, out System.Version minimumVersion))
+            {
+                return actualVersion >= minimumVersion;
+            }
+
+            return false;
+        }
 
         private const int MaxTimeSamples = 20;
 
@@ -176,7 +207,18 @@ namespace Timing.RotorHazard
                 bool result = false;
                 using (Waiter reponseWaiter = new Waiter())
                 {
-                    socket = new SocketIO("http://" + settings.HostName + ":" + settings.Port);
+                    SocketIOOptions options = new SocketIOOptions();
+                    if (!string.IsNullOrEmpty(settings.AdminUsername) || !string.IsNullOrEmpty(settings.AdminPassword))
+                    {
+                        string credentials = settings.AdminUsername + ":" + settings.AdminPassword;
+                        string basicAuth = Convert.ToBase64String(Encoding.ASCII.GetBytes(credentials));
+                        options.ExtraHeaders = new Dictionary<string, string>
+                        {
+                            { "Authorization", "Basic " + basicAuth }
+                        };
+                    }
+
+                    socket = new SocketIO("http://" + settings.HostName + ":" + settings.Port, options);
                     socket.OnConnected += (object sender, EventArgs e) =>
                     {
                         if (reponseWaiter.IsDisposed)
@@ -201,6 +243,7 @@ namespace Timing.RotorHazard
                             Logger.TimingLog.Log(this, "Connected");
 
                             socket.EmitAsync("ts_server_info", OnServerInfo);
+                            SendEventMetaData();
 
                             connectionCount++;
                         }
@@ -676,6 +719,105 @@ namespace Timing.RotorHazard
             }
         }
 
+        public RSSIWaveform GetWaveform(Guid raceId, Guid pilotId)
+        {
+            SocketIO s = socket;
+            if (s == null || !Connected || !MarshalSupported)
+                return null;
+
+            RaceMarshalWaveformRequest request = new RaceMarshalWaveformRequest
+            {
+                race_id = raceId,
+                pilot_id = pilotId
+            };
+
+            RaceMarshalWaveformResponse? waveformResponse = null;
+
+            try
+            {
+                using (Waiter responseWait = new Waiter())
+                {
+                    s.EmitAsync("ts_race_marshal_waveform", (SocketIOResponse response) =>
+                    {
+                        if (responseWait.IsDisposed)
+                            return;
+
+                        try
+                        {
+                            // RH returns None (no ack payload) when it has no waveform for this
+                            // race/pilot - leave waveformResponse null in that case.
+                            if (response.Count > 0)
+                            {
+                                waveformResponse = response.GetValue<RaceMarshalWaveformResponse>();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.TimingLog.LogException(this, ex);
+                        }
+
+                        responseWait.Set();
+                    }, request);
+
+                    if (!responseWait.WaitOne(TimeOut))
+                    {
+                        Logger.TimingLog.Log(this, "GetWaveform took too long");
+                        return null;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.TimingLog.LogException(this, e);
+                return null;
+            }
+
+            if (waveformResponse == null || waveformResponse.Value.history_values == null || waveformResponse.Value.history_times == null)
+                return null;
+
+            RaceMarshalWaveformResponse waveform = waveformResponse.Value;
+
+            int count = Math.Min(waveform.history_values.Length, waveform.history_times.Length);
+            TimeSpan[] times = new TimeSpan[count];
+            int[] values = new int[count];
+
+            for (int i = 0; i < count; i++)
+            {
+                times[i] = TimeSpan.FromSeconds(waveform.history_times[i] - waveform.race_start_time);
+                values[i] = (int)Math.Round(waveform.history_values[i]);
+            }
+
+            return new RSSIWaveform
+            {
+                Times = times,
+                Values = values,
+                EnterAt = waveform.enter_at,
+                ExitAt = waveform.exit_at
+            };
+        }
+
+        public void PushMarshalUpdate(MarshalData marshalData)
+        {
+            if (!Connected || !MarshalSupported)
+                return;
+
+            RaceMarshalUpdate update = new RaceMarshalUpdate
+            {
+                race_id = marshalData.RaceID,
+                pilot_id = marshalData.PilotID,
+                laps = marshalData.Laps.Select(l => new RaceMarshalUpdateLap
+                {
+                    deleted = !l.Valid,
+                    lap_time = l.Length.TotalMilliseconds,
+                    lap_time_stamp = l.RaceTime.TotalMilliseconds
+                }).ToList()
+            };
+
+            Logger.TimingLog.Log(this, "Pushing marshal update for pilot: " + marshalData.PilotName);
+
+            socket?.EmitAsync("ts_race_marshal_update", update);
+        }
+
         private RaceMarshalData ParseRaceMarshalData(JsonElement element)
         {
             var raceData = new RaceMarshalData
@@ -702,5 +844,23 @@ namespace Timing.RotorHazard
             return raceData;
         }
 
+        private EventMetaData eventMetaData;
+
+        // Cached rather than sent immediately, since this can be called before the socket is
+        // connected (e.g. the event loads before RH does) - SendEventMetaData() re-sends
+        // whatever's cached here every time the socket (re)connects, covering both orderings.
+        public void SetEventMetaData(EventMetaData eventMetaData)
+        {
+            this.eventMetaData = eventMetaData;
+            SendEventMetaData();
+        }
+
+        private void SendEventMetaData()
+        {
+            if (!Connected || eventMetaData == null)
+                return;
+
+            socket?.EmitAsync("ts_event_info", new EventInfo { name = eventMetaData.Name });
+        }
     }
 }

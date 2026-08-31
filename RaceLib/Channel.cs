@@ -19,8 +19,8 @@ namespace RaceLib
         B = 4,
         E = 5,
         DJIFPVHD = 6,
-        SharkByte = 7,
         HDZero = 7,
+        SharkByte = 7,
         LowBand = 8,
         Diatone = 9,
 
@@ -33,7 +33,10 @@ namespace RaceLib
     {
         Analogue,
         DJIDigital,
-        HDZeroDigital
+        HDZeroDigital,
+        DJIO3Digital,
+        DJIO4Digital,
+        WalkSnailDigital,
     }
 
     public class Channel : BaseObject
@@ -129,6 +132,12 @@ namespace RaceLib
         public string GetBandChannelText()
         {
             if (Band == Band.None) return "--";
+
+            // HDZero low band reads as plain L1-L8 on screen, matching the VTX/goggle menus.
+            if (Band == Band.HDZero && ChannelPrefix == 'L')
+            {
+                return ChannelPrefix + Number.ToString();
+            }
 
             if (ChannelPrefix != char.MinValue)
             {
@@ -257,13 +266,13 @@ namespace RaceLib
             new Channel(40, 8, Band.DJIFPVHD),
         };
         public static Channel[] DJIO3 = new Channel[] {
-            new Channel(75, 1, Band.DJIO3),
-            new Channel(76, 2, Band.DJIO3),
-            new Channel(77, 3, Band.DJIO3),
-            new Channel(78, 4, Band.DJIO3),
-            new Channel(79, 5, Band.DJIO3),
-            new Channel(80, 6, Band.DJIO3),
-            new Channel(81, 7, Band.DJIO3),
+            new Channel(75, 'O', 1, Band.DJIO3),
+            new Channel(76, 'O', 2, Band.DJIO3),
+            new Channel(77, 'O', 3, Band.DJIO3),
+            new Channel(78, 'O', 4, Band.DJIO3),
+            new Channel(79, 'O', 5, Band.DJIO3),
+            new Channel(80, 'O', 6, Band.DJIO3),
+            new Channel(81, 'O', 7, Band.DJIO3),
         };
 
         public static Channel[] DJIO4 = new Channel[] {
@@ -298,7 +307,28 @@ namespace RaceLib
             new Channel(55, 'R', 7, Band.HDZero),
             new Channel(56, 'R', 8, Band.HDZero),
             new Channel(57, 'F', 2, Band.HDZero),
-            new Channel(58, 'F', 4, Band.HDZero)
+            new Channel(58, 'F', 4, Band.HDZero),
+            new Channel(82, 'L', 1, Band.HDZero),
+            new Channel(83, 'L', 2, Band.HDZero),
+            new Channel(84, 'L', 3, Band.HDZero),
+            new Channel(85, 'L', 4, Band.HDZero),
+            new Channel(86, 'L', 5, Band.HDZero),
+            new Channel(87, 'L', 6, Band.HDZero),
+            new Channel(88, 'L', 7, Band.HDZero),
+            new Channel(89, 'L', 8, Band.HDZero)
+        };
+
+        // HDZero VTX low band L1-L8. Same frequencies as Diatone / D band (5362 + 37 MHz steps),
+        // kept as its own group so a race can mix HDZero and analogue ground stations.
+        public static Channel[] HDZeroLowBand = new Channel[] {
+            HDZero[10],
+            HDZero[11],
+            HDZero[12],
+            HDZero[13],
+            HDZero[14],
+            HDZero[15],
+            HDZero[16],
+            HDZero[17],
         };
 
         public static Channel[] HDZeroRace = new Channel[] {
@@ -440,6 +470,8 @@ namespace RaceLib
                             return FrequencyLookup(Band.Raceband, prefix, channel);
                         case 'F': 
                             return FrequencyLookup(Band.Fatshark, prefix, channel);
+                        case 'L':
+                            return FrequencyLookup(Band.Diatone, prefix, channel);
                     }
                     break;
 

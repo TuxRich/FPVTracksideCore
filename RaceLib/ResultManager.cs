@@ -557,7 +557,7 @@ namespace RaceLib
                     }
                     else
                     {
-                        r.Time = lastDetection.Time - race.Start;
+                        r.Time = lastDetection.Time - race.GetRaceStartTime(pilot);
                     }
                     r.LapsFinished = lastDetection.LapNumber;
                 }
@@ -715,7 +715,7 @@ namespace RaceLib
             }
         }
 
-        public string[][] GetResultsText(Race race, Units units)
+        public string[][] GetResultsText(Race race, Units units, int decimalPlaces)
         {
             bool showDNF = PointsSettings.DNFForUnfinishedRaces;
 
@@ -754,8 +754,9 @@ namespace RaceLib
                     bool dnfed = DNFed(race, p);
                     if (!dnfed)
                     {
-                        lapsTimeString = lapstime.TotalSeconds.ToString("0.00");
-                        raceTimeString = raceTime.TotalSeconds.ToString("0.00");
+                        string exportFormat = "F" + decimalPlaces;
+                        lapsTimeString = lapstime.TotalSeconds.ToString(exportFormat);
+                        raceTimeString = raceTime.TotalSeconds.ToString(exportFormat);
                     }
 
                     foreach (ExportColumn ec in EventManager.ExportColumns.Where(ec1 => ec1.Enabled))
@@ -799,7 +800,7 @@ namespace RaceLib
                                 }
                                 else
                                 {
-                                    line.Add(fastestLap.TotalSeconds.ToString("0.00"));
+                                    line.Add(fastestLap.TotalSeconds.ToString("F" + decimalPlaces));
                                 }
                                 break;
                             case ExportColumn.ColumnTypes.PBTime:
@@ -809,7 +810,7 @@ namespace RaceLib
                                 }
                                 else
                                 {
-                                    line.Add(pbTime.TotalSeconds.ToString("0.00"));
+                                    line.Add(pbTime.TotalSeconds.ToString("F" + decimalPlaces));
                                 }
                                 break;
                             case ExportColumn.ColumnTypes.RaceTime:
@@ -845,22 +846,22 @@ namespace RaceLib
                                 break;
 
                             case ExportColumn.ColumnTypes.Lap1Time:
-                                line.Add(GetLapTime(1, laps));
+                                line.Add(GetLapTime(1, laps, decimalPlaces));
                                 break;
                             case ExportColumn.ColumnTypes.Lap2Time:
-                                line.Add(GetLapTime(2, laps));
+                                line.Add(GetLapTime(2, laps, decimalPlaces));
                                 break;
                             case ExportColumn.ColumnTypes.Lap3Time:
-                                line.Add(GetLapTime(3, laps));
+                                line.Add(GetLapTime(3, laps, decimalPlaces));
                                 break;
                             case ExportColumn.ColumnTypes.Lap4Time:
-                                line.Add(GetLapTime(4, laps));
+                                line.Add(GetLapTime(4, laps, decimalPlaces));
                                 break;
                             case ExportColumn.ColumnTypes.Lap5Time:
-                                line.Add(GetLapTime(5, laps));
+                                line.Add(GetLapTime(5, laps, decimalPlaces));
                                 break;
                             case ExportColumn.ColumnTypes.Lap6Time:
-                                line.Add(GetLapTime(6, laps));
+                                line.Add(GetLapTime(6, laps, decimalPlaces));
                                 break;
                             case ExportColumn.ColumnTypes.Points:
                                 if (r != null)
@@ -883,12 +884,12 @@ namespace RaceLib
             return output.ToArray();
         }
 
-        private string GetLapTime(int number, IEnumerable<Lap> laps)
+        private string GetLapTime(int number, IEnumerable<Lap> laps, int decimalPlaces)
         {
             Lap lap = laps.FirstOrDefault(l => l.Number == number);
             if (lap != null)
             {
-                return lap.Length.TotalSeconds.ToString("0.00");
+                return lap.Length.TotalSeconds.ToString("F" + decimalPlaces);
             }
             else
             {
@@ -902,6 +903,45 @@ namespace RaceLib
             {
                 Results.Clear();
             }
+        }
+
+        public void Unload()
+        {
+            lock (Results)
+            {
+                Results.Clear();
+            }
+        }
+
+        public int RecalculateMissingRaceResults()
+        {
+            HashSet<Guid> racesWithResults;
+            lock (Results)
+            {
+                racesWithResults = Results
+                    .Where(result => result.Race != null)
+                    .Select(result => result.Race.ID)
+                    .ToHashSet();
+            }
+
+            Race[] missingResults = EventManager.RaceManager.GetRaces(race =>
+                race.Valid &&
+                race.Ended &&
+                race.Round != null &&
+                race.Round.EventType.HasResult() &&
+                race.PilotCount > 0 &&
+                !racesWithResults.Contains(race.ID));
+
+            int recalculated = 0;
+            foreach (Race race in missingResults)
+            {
+                if (SaveResults(race))
+                {
+                    recalculated++;
+                }
+            }
+
+            return recalculated;
         }
 
         public void Recalculate(Round endRound)

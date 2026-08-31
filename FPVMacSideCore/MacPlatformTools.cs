@@ -25,26 +25,6 @@ namespace FPVMacsideCore
             }
         }
 
-        public override bool Focused
-        {
-            get
-            {
-                return true;
-            }
-        }
-
-        public override PlatformFeature[] Features
-        {
-            get
-            {
-                return new PlatformFeature[]
-                {
-                    PlatformFeature.Speech,
-                    PlatformFeature.Video
-                };
-            }
-        }
-
         public override string InstallerExtension
         {
             get
@@ -64,13 +44,21 @@ namespace FPVMacsideCore
         public override Microsoft.Xna.Framework.Input.Keys[] CutCopyPasteModifierKeys => [Microsoft.Xna.Framework.Input.Keys.LeftWindows, Microsoft.Xna.Framework.Input.Keys.RightWindows];
 
 
-        public MacPlatformTools()
+        public MacPlatformTools() : this("FPVTrackside") { }
+
+        public MacPlatformTools(string appName)
         {
+            Features = new PlatformFeature[]
+            {
+                PlatformFeature.Speech,
+                PlatformFeature.Video
+            };
+
             Console.WriteLine("Mac Platform Start");
             Console.WriteLine("Working Dir " + Directory.GetCurrentDirectory());
 
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            workingDirectory = new DirectoryInfo(Path.Combine(home, "Documents", "FPVTrackside"));
+            workingDirectory = new DirectoryInfo(Path.Combine(home, "Documents", appName));
 
             if (!WorkingDirectory.Exists)
             {
@@ -99,7 +87,7 @@ namespace FPVMacsideCore
             Console.WriteLine("Source " + oldWorkDir.FullName);
 
             // Copy directories
-            string[] toCopy = new string[] { "themes", "img", "bitmapfonts", "httpfiles", "formats", "sounds", "Content" };
+            string[] toCopy = new string[] { "themes", "img", "bitmapfonts", "httpfiles", "formats", "scripts", "sounds", "Content" };
             foreach (string copy in toCopy)
             {
                 try

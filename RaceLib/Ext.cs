@@ -176,6 +176,33 @@ namespace RaceLib
             }
         }
 
+        public static bool CanAddPilotsDuringRace(this EventTypes eventType)
+        {
+            switch (eventType)
+            {
+                case EventTypes.Training:
+                case EventTypes.Practice:
+                case EventTypes.CasualPractice:
+                case EventTypes.Freestyle:
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        public static bool ListenAllChannels(this EventTypes eventType)
+        {
+            switch (eventType)
+            {
+                case EventTypes.CasualPractise:
+                case EventTypes.Training:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         public static string GetCharacter(this Band band)
         {
             if (band == Band.HDZero)
@@ -322,6 +349,12 @@ namespace RaceLib
             {
                 case Band.DJIFPVHD:
                     return BandType.DJIDigital;
+                case Band.DJIO3:
+                    return BandType.DJIO3Digital;
+                case Band.DJIO4:
+                    return BandType.DJIO4Digital;
+                case Band.WalkSnail:
+                    return BandType.WalkSnailDigital;
                 case Band.HDZero:
                     return BandType.HDZeroDigital;
                 default:
@@ -332,6 +365,11 @@ namespace RaceLib
         public static Channel GetByShortString(this IEnumerable<Channel> channels, string shortString)
         {
             return channels.FirstOrDefault(c => c.ToStringShort() == shortString);
+        }
+
+        public static Channel GetByString(this IEnumerable<Channel> channels, string channelString)
+        {
+            return channels.FirstOrDefault(c => c.ToStringShort() == channelString || c.GetBandChannelText() == channelString);
         }
 
         public static IEnumerable<Channel> GetOthersInChannelGroup(this IEnumerable<Channel> pool, Channel c)
@@ -373,7 +411,7 @@ namespace RaceLib
                 Channel[] interferring = next.GetInterferringChannels(channels).ToArray();
                 if (interferring.Any())
                 {
-                    yield return interferring.ToArray();
+                    yield return interferring.OrderBy(r => r.Band).ToArray();
                     channels.RemoveAll(r => interferring.Contains(r));
                 }
             }
@@ -434,19 +472,14 @@ namespace RaceLib
             }
         }
 
-        public static string Names(this Pilot[] pilots)
+        public static string Names(this Pilot[] pilots, string listSeparator = ", ")
         {
-            return string.Join(", ", pilots.Select(p => p.Name));
+            return string.Join(listSeparator, pilots.Select(p => p.Name));
         }
 
-        public static string Phonetic(this Pilot[] pilots)
+        public static string Phonetic(this Pilot[] pilots, string listSeparator = ", ")
         {
-            return string.Join(", ", pilots.Select(p => p.Phonetic));
-        }
-
-        public static string PhoneticNoComma(this Pilot[] pilots)
-        {
-            return string.Join(" ", pilots.Select(p => p.Phonetic));
+            return string.Join(listSeparator, pilots.Select(p => p.Phonetic));
         }
 
         public static IEnumerable<Pilot> Seed(this IEnumerable<Pilot> orderedPilots, int channelCount)

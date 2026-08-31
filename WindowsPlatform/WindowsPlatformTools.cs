@@ -7,6 +7,7 @@ using Microsoft.Xna.Framework;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -14,6 +15,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Tools;
+using UI;
 using UI.Video;
 
 namespace WindowsPlatform
@@ -23,10 +25,7 @@ namespace WindowsPlatform
 
         private IClipboard clipboard;
         public override IClipboard Clipboard { get => clipboard; }
-        
-        private bool focused;
-        public override bool Focused { get => focused; }
-
+       
         public Control Control { get; private set; }
 
         public const string loginFile = @"data\login.enc";
@@ -36,19 +35,6 @@ namespace WindowsPlatform
             get
             {
                 return ".msi";
-            }
-        }
-
-        public override PlatformFeature[] Features
-        {
-            get
-            {
-                return new PlatformFeature[]
-                {
-                    PlatformFeature.Speech,
-                    PlatformFeature.Video,
-                    PlatformFeature.GMFBridge
-                };
             }
         }
 
@@ -69,10 +55,23 @@ namespace WindowsPlatform
         {
             workingDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
             clipboard = new Clipboard();
+
+            Features = new PlatformFeature[]
+            {
+                PlatformFeature.Speech,
+                PlatformFeature.Video,
+                PlatformFeature.GMFBridge,
+                PlatformFeature.SecondaryWindow
+            };
         }
 
         public override ITextRenderer CreateTextRenderer()
         {
+            if (ApplicationProfileSettings.Instance.TextRenderer == ApplicationProfileSettings.TextRendererBackend.Skia)
+            {
+                return new TextRenderSkia();
+            }
+
             return new TextRenderWPF();
         }
 
@@ -86,7 +85,7 @@ namespace WindowsPlatform
             Control.BeginInvoke(d);
         }
 
-        public void SetGameWindow(GameWindow window, System.Drawing.Icon icon)
+        public virtual void SetGameWindow(GameWindow window, System.Drawing.Icon icon)
         {
             Control = System.Windows.Forms.Control.FromHandle(window.Handle);
 
@@ -94,17 +93,6 @@ namespace WindowsPlatform
             if (form != null)
             {
                 form.Icon = icon;
-            }
-
-            if (Control != null)
-            {
-                Control.GotFocus += (e, s) => { focused = true; };
-                Control.LostFocus += (e, s) => { focused = false; };
-                focused = Control.Focused;
-            }
-            else
-            {
-                throw new Exception("Windows forms was expected");
             }
         }
 
@@ -212,4 +200,28 @@ namespace WindowsPlatform
             System.Diagnostics.Process.Start("explorer.exe", directory);
         }
     }
+
+    public class WindowsPlatformToolsGDI : WindowsPlatformTools
+    {
+
+        private bool focused;
+        public override bool Focused { get => focused; }
+
+        public override void SetGameWindow(GameWindow window, Icon icon)
+        {
+            base.SetGameWindow(window, icon);
+
+            if (Control != null)
+            {
+                Control.GotFocus += (e, s) => { focused = true; };
+                Control.LostFocus += (e, s) => { focused = false; };
+                focused = Control.Focused;
+            }
+            else
+            {
+                throw new Exception("Windows forms was expected");
+            }
+        }
+    }
+
 }

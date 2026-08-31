@@ -355,38 +355,34 @@ namespace RaceLib
             return false;
         }
 
-        public bool IsRecordLap(Lap lap, out bool overalBest)
+        public bool IsRecord(Lap lap, int lapCount, out bool overalBest)
         {
-            int lapCount = 1;
-            overalBest = false;
-
             Lap[] laps;
             if (overallBest.TryGetValue(lapCount, out laps))
             {
-                if (laps[0].ID == lap.ID)
+                if (laps.Any(l => l.ID == lap.ID))
                 {
                     overalBest = true;
                     return true;
                 }
             }
 
+            overalBest = false;
+
             PilotLapRecord plr = GetPilotLapRecord(lap.Pilot);
             if (plr != null)
             {
                 laps = plr.GetBestConsecutiveLaps(lapCount);
-                if (laps.Any())
+                if (laps.Any(l => l.ID == lap.ID))
                 {
-                    if (laps[0].ID == lap.ID)
-                    {
-                        return true;
-                    }
+                    return true;
                 }
             }
 
             return false;
         }
 
-        public string[][] ExportPBs()
+        public string[][] ExportPBs(int decimalPlaces)
         {
             List<string> line = new List<string>();
 
@@ -439,7 +435,7 @@ namespace RaceLib
                         if (laps != null && laps.Any())
                         {
                             TimeSpan timeSpan = laps.TotalTime();
-                            line.Add(timeSpan.TotalSeconds.ToString("0.000"));
+                            line.Add(timeSpan.TotalSeconds.ToString("F" + decimalPlaces));
                         }
                         else
                         {
@@ -455,7 +451,7 @@ namespace RaceLib
 
                         foreach (Lap lap in laps)
                         {
-                            line.Add(lap.Length.TotalSeconds.ToString("0.000"));
+                            line.Add(lap.Length.TotalSeconds.ToString("F" + decimalPlaces));
                         }
                         line.Add("");
                     }

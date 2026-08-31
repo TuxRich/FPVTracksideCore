@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -54,6 +54,8 @@ namespace UI.Nodes
         
         private TextNode rssiNode;
         private TextNode sensitivityNode;
+        private Node velocidroneGateContainer;
+        private TextNode velocidroneGateNode;
 
         public EventManager EventManager { get; private set; }
 
@@ -97,8 +99,6 @@ namespace UI.Nodes
 
         public CrashState CrashedOutType { get; private set; }
 
-        public event Action<Channel, Pilot> OnCrashedOut;
-
         public bool Finished { get { return resultContainer.Visible; } }
            
         private ColorNode crashedOut;
@@ -107,6 +107,11 @@ namespace UI.Nodes
         private Detection nextDetection;
         private bool needsLapRefresh;
         private bool needsSplitClear;
+
+        private ColorNode goFlashBackground;
+        private TextNode goFlashText;
+        private DateTime? goFlashEnd;
+        private static readonly TimeSpan GoFlashDuration = TimeSpan.FromSeconds(1.5);
 
         public event Action RequestReorder;
         public event Action OnPBChange;
@@ -163,6 +168,7 @@ namespace UI.Nodes
             EventManager.LapRecordManager.OnNewPersonalBest += RecordManager_OnNewPersonalBest;
             EventManager.RaceManager.OnRaceResumed += RaceManager_OnRaceStateChanged;
             EventManager.GameManager.OnGamePointChanged += RaceManager_OnGamePoint;
+            EventManager.RaceManager.OnPilotHandicapStart += RaceManager_OnPilotHandicapStart;
         }
 
 
@@ -182,6 +188,7 @@ namespace UI.Nodes
             EventManager.RaceManager.OnLapsRecalculated -= RaceManager_OnLapsRecalculated;
             EventManager.LapRecordManager.OnNewPersonalBest -= RecordManager_OnNewPersonalBest;
             EventManager.GameManager.OnGamePointChanged -= RaceManager_OnGamePoint;
+            EventManager.RaceManager.OnPilotHandicapStart -= RaceManager_OnPilotHandicapStart;
 
             base.Dispose();
         }
@@ -221,6 +228,13 @@ namespace UI.Nodes
             needUpdatePosition = true;
         }
 
+        private void RaceManager_OnPilotHandicapStart(Race race, Pilot pilot)
+        {
+            if (pilot == null || Pilot == null) return;
+            if (pilot.ID != Pilot.ID) return;
+            goFlashEnd = DateTime.Now + GoFlashDuration;
+        }
+
         private void RaceManager_OnLapDisqualified(Lap lap)
         {
             needUpdatePosition = true;
@@ -251,6 +265,21 @@ namespace UI.Nodes
         private void RaceManager_OnGamePoint(GamePoint obj)
         {
             gamePoints.Points = EventManager.GameManager.GetCurrentGamePoints(Channel);
+        }
+
+        /// <summary>Show Velocidrone gate info on this pilot's channel. Only visible when Velocidrone timer is in use.</summary>
+        public void SetVelocidroneGate(int gate, int lap)
+        {
+            if (velocidroneGateNode == null || velocidroneGateContainer == null) return;
+            velocidroneGateNode.Text = $"Gate {gate}";
+            velocidroneGateContainer.Visible = true;
+        }
+
+        /// <summary>Hide Velocidrone gate display (e.g. when race ends).</summary>
+        public void ClearVelocidroneGate()
+        {
+            if (velocidroneGateContainer != null)
+                velocidroneGateContainer.Visible = false;
         }
 
         public void SetCrashedOutType(CrashState type)
@@ -327,6 +356,16 @@ namespace UI.Nodes
             channelInfo.Alignment = RectangleAlignment.TopRight;
             channelInfo.Style.Border = true;
             DisplayNode.AddChild(channelInfo);
+
+            velocidroneGateNode = new TextNode("", Theme.Current.PilotViewTheme.PilotOverlayText.XNA);
+            velocidroneGateNode.RelativeBounds = new RectangleF(0.05f, 0.1f, 0.9f, 0.8f);
+            velocidroneGateNode.Alignment = RectangleAlignment.CenterLeft;
+            velocidroneGateNode.Style.Border = true;
+
+            velocidroneGateContainer = new ColorNode(new Color(0, 0, 0, 100));
+            velocidroneGateContainer.RelativeBounds = new RectangleF(0f, 0.22f, 0.18f, 0.05f);
+            velocidroneGateContainer.Visible = false;
+            velocidroneGateContainer.AddChild(velocidroneGateNode);
 
             CloseButton = new CloseNode();
             CloseButton.Visible = false;
@@ -420,6 +459,23 @@ namespace UI.Nodes
             crashedOut.Visible = false;
             DisplayNode.AddChild(crashedOut);
 
+            goFlashBackground = new ColorNode(new Color(40, 220, 80));
+            goFlashBackground.KeepAspectRatio = false;
+            goFlashBackground.Visible = false;
+            goFlashBackground.Alpha = 0;
+            DisplayNode.AddChild(goFlashBackground);
+
+            goFlashText = new TextNode("GO!", Color.White);
+            goFlashText.Style.Bold = true;
+            goFlashText.Style.Border = true;
+            goFlashText.Alignment = RectangleAlignment.Center;
+            goFlashText.RelativeBounds = new RectangleF(0.1f, 0.2f, 0.8f, 0.6f);
+            goFlashText.Visible = false;
+            goFlashText.Alpha = 0;
+            DisplayNode.AddChild(goFlashText);
+
+            DisplayNode.AddChild(velocidroneGateContainer);
+
             if (Theme.Current.Shadows)
                 AddChild(new ShadowNode());
 
@@ -428,9 +484,11 @@ namespace UI.Nodes
             SetBiggerInfo(true, true);
         }
 
+        public bool AllowCrashedOut { get; set; } = true;
+
         public void Close()
         {
-            if (CrashedOut || Finished || EventManager.RaceManager.CanRunRace)
+            if (!AllowCrashedOut || CrashedOut || Finished || EventManager.RaceManager.CanRunRace)
             {
                 OnCloseClick?.Invoke();
                 CrashedOutType = CrashState.ManualDown;
@@ -607,6 +665,8 @@ namespace UI.Nodes
                 {
                     Lap best = laps.OrderBy(l => l.Length).First();
 
+                    Lap[] pbLaps = laps.BestConsecutive(EventManager.Event.PBLaps).ToArray();
+
                     if (race.Type == EventTypes.TimeTrial)
                     {
                         laps = laps.BestConsecutive(EventManager.Event.Laps).ToArray();
@@ -642,7 +702,14 @@ namespace UI.Nodes
                         raceSummary1.Text += preText + " in " + totalTime.ToStringRaceTime() + " - ";
                     }
 
-                    raceSummary1.Text += "Fastest lap " + best.Length.ToStringRaceTime();
+                    if (EventManager.Event.PBLaps == 1 || EventManager.Event.Laps == EventManager.Event.PBLaps)
+                    {
+                        raceSummary1.Text += "Fastest lap " + best.Length.ToStringRaceTime();
+                    }
+                    else
+                    {
+                        raceSummary1.Text += EventManager.Event.PBLaps + " laps in " + pbLaps.TotalTime().ToStringRaceTime();
+                    }
 
                     if (EventManager.SpeedRecordManager.DistanceManager.HasDistance)
                     {
@@ -857,12 +924,50 @@ namespace UI.Nodes
             // udpdate crashed out visible
             crashedOut.Visible = CrashedOut && !resultContainer.Visible;
 
+            UpdateGoFlash();
+
             base.Update(gameTime);
+        }
+
+        private void UpdateGoFlash()
+        {
+            if (goFlashBackground == null || goFlashText == null) return;
+
+            if (!goFlashEnd.HasValue)
+            {
+                if (goFlashBackground.Visible)
+                {
+                    goFlashBackground.Visible = false;
+                    goFlashText.Visible = false;
+                }
+                return;
+            }
+
+            TimeSpan remaining = goFlashEnd.Value - DateTime.Now;
+            if (remaining <= TimeSpan.Zero)
+            {
+                goFlashEnd = null;
+                goFlashBackground.Visible = false;
+                goFlashText.Visible = false;
+                return;
+            }
+
+            float t = (float)(remaining.TotalSeconds / GoFlashDuration.TotalSeconds);
+            if (t < 0f) t = 0f;
+            if (t > 1f) t = 1f;
+
+            goFlashBackground.Visible = true;
+            goFlashText.Visible = true;
+            goFlashBackground.Alpha = 0.55f * t;
+            goFlashText.Alpha = t;
         }
 
 
         public void UpdatePosition(Detection detection)
         {
+            if (Replay)
+                return;
+
             int oldPosition = Position;
 
             bool newDetection = false;

@@ -143,11 +143,17 @@ namespace UI.Nodes.Rounds
         {
             List<string[]> output = new List<string[]>();
             output.Add(new string[] { "Pilot", "Time" });
-            foreach (EventPilotTimeNode pn in PilotNodes.OrderBy(pn => pn.Bounds.Y))
+            foreach (EventPilotTimeNode pn in PilotNodes.OrderBy(pn => pn.Bounds.X).ThenBy(pn => pn.Bounds.Y))
             {
                 if (pn.Pilot != null)
                 {
-                    output.Add(new string[] { pn.Pilot.Name, pn.TimeNode.Text });
+                    string time = "";
+                    if (pn.Time != TimeSpan.MaxValue && pn.Time != TimeSpan.Zero)
+                    {
+                        time = pn.Time.ToStringRaceTime(ApplicationProfileSettings.Instance.ExportDecimalPlaces);
+                    }
+
+                    output.Add(new string[] { pn.Pilot.Name, time });
                 }
             }
             return output.ToArray();
@@ -195,6 +201,14 @@ namespace UI.Nodes.Rounds
                     {
                         eventManager.RaceManager.SetRace(race);
                     });
+
+                    if (eventManager.HasReplay(race))
+                    {
+                        mouseMenu.AddItem("Jump to Replay", () =>
+                        {
+                            eventManager.JumpToReplay(race, Laps.FirstOrDefault());
+                        });
+                    }
                 }
             }
 

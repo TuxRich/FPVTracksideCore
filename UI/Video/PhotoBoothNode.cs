@@ -21,7 +21,7 @@ using UI.Nodes;
 
 namespace UI.Video
 {
-    public class PhotoBoothNode : Node
+    public class PhotoBoothNode : Node, IUpdateableNode
     {
         public Pilot Pilot { get; private set; }
 
@@ -45,13 +45,16 @@ namespace UI.Video
 
         public TimeSpan Timeout { get; private set; }
 
-        public PhotoBoothNode(VideoManager videoManager, EventManager eventManager, SoundManager soundManager) 
+        private string pendingFilename;
+        private DateTime finalizingStartTime;
+
+        public PhotoBoothNode(VideoManager videoManager, EventManager eventManager, SoundManager soundManager)
         {
             this.videoManager = videoManager;
             this.eventManager = eventManager;
             this.soundManager = soundManager;
 
-            PilotsDirectory = new DirectoryInfo("pilots");
+            PilotsDirectory = new DirectoryInfo(IOTools.ResolveFromWorkingDirectory("pilots"));
             Timeout = TimeSpan.FromSeconds(10);
         }
 
@@ -139,8 +142,9 @@ namespace UI.Video
 
             string filenameSafe = Maths.SafeFileNameFromString(Pilot.Name + "_temp.png");
 
+            // Kept absolute: everything downstream does file IO with it, and it is only
+            // made relative to the working directory when it is stored on the pilot.
             string newPath = Path.Combine(PilotsDirectory.FullName, filenameSafe);
-            newPath = Path.GetRelativePath(Directory.GetCurrentDirectory(), newPath);
             camNode.FrameNode.SaveImage(newPath);
 
             if (File.Exists(newPath))
@@ -177,23 +181,44 @@ namespace UI.Video
         {
             soundManager.PlaySound(SoundKey.PhotoboothTrigger);
 
-            string filename = CaptureFrameSource.Filename;
+            pendingFilename = CaptureFrameSource.Filename;
+            finalizingStartTime = DateTime.Now;
             CaptureFrameSource.StopRecording();
             CaptureFrameSource.ManualRecording = false;
+        }
 
-            if (!Waiter.WaitFor(() => { return !CaptureFrameSource.Finalising; }, Timeout))
+        public void Update(GameTime gameTime)
+        {
+            if (pendingFilename == null || CaptureFrameSource == null)
+                return;
+
+            if (CaptureFrameSource.Finalising)
             {
+                if (DateTime.Now - finalizingStartTime > Timeout)
+                {
+                    Logger.VideoLog.LogCall(this, "Wait for finalising timeout.");
+                    pendingFilename = null;
+                }
                 return;
             }
 
+            string filename = pendingFilename;
+            pendingFilename = null;
+
             if (File.Exists(filename))
             {
-                // Video is recorded raw, so store the source's flip/mirror state for playback
+                // The encoder stores frames in the correct orientation regardless of the
+                // capture source's Direction. The only flip state that needs carrying through
+                // is the user's explicit VideoConfig.Flipped preference, because that is NOT
+                // applied during recording (unlike ffmpeg sources which bake it in).
                 FrameSource source = camNode.FrameNode.Source;
-                bool flipped = source.Direction == FrameSource.Directions.TopDown;
-                if (source.VideoConfig.Flipped)
-                    flipped = !flipped;
-                bool mirrored = source.VideoConfig.Mirrored;
+                bool flipped = false;
+                bool mirrored = false;
+                if (!source.AppliesUserFlipMirror)
+                {
+                    flipped = source.VideoConfig.Flipped;
+                    mirrored = source.VideoConfig.Mirrored;
+                }
 
                 ConfirmPictureNode confirmPictureNode = new ConfirmPictureNode(eventManager.EventId, Pilot, Pilot.PhotoPath, filename, flipped, mirrored);
                 confirmPictureNode.OnUseNew += ConfirmPictureNode_OnUseNew;
@@ -405,7 +430,7 @@ namespace UI.Video
         }
     }
 
-    public class ConfirmPictureNode : BorderPanelNode
+    public class ConfirmPictureNode : BorderPanelShadowNode
     {
         private FileInfo existingPhoto;
         private FileInfo newPhoto;
@@ -438,7 +463,7 @@ namespace UI.Video
 
             if (!string.IsNullOrEmpty(existingFilename))
             {
-                existingPhoto = new FileInfo(existingFilename);
+                existingPhoto = new FileInfo(IOTools.ResolveFromWorkingDirectory(existingFilename));
             }
             newPhoto = new FileInfo(newFilename);
 
@@ -483,7 +508,7 @@ namespace UI.Video
 
                 newPhoto.MoveTo(newFileName.FullName);
 
-                pilot.PhotoPath = Path.GetRelativePath(Directory.GetCurrentDirectory(), newFileName.FullName);
+                pilot.PhotoPath = IOTools.RelativiseToWorkingDirectory(newFileName.FullName);
                 pilot.VideoFlipped = videoFlipped;
                 pilot.VideoMirrored = videoMirrored;
                 using (IDatabase db = DatabaseFactory.Open(eventId))

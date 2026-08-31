@@ -40,7 +40,7 @@ namespace UI.Video
 
         public static VideoSourceEditor GetVideoSourceEditor(EventManager em, Profile profile)
         {
-            VideoManager videoManager = new VideoManager(ApplicationProfileSettings.Instance.EventStorageLocation, profile);
+            VideoManager videoManager = new VideoManager(ApplicationProfileSettings.Instance.EventStorageDirectory.FullName, profile);
 
             videoManager.LoadDevices();
             videoManager.MaintainConnections = true;
@@ -125,6 +125,7 @@ namespace UI.Video
                 }
             
                 mouseMenu.AddItem("File", AddVideoFile);
+                mouseMenu.AddItem("RTMP Server", AddRtmpSource);
                 //mouseMenu.AddItem("RTSP URL", AddURL);
 
                 // Group by framework.
@@ -194,6 +195,37 @@ namespace UI.Video
             }
         }
 
+        private void AddRtmpSource()
+        {
+            int port = 19301;
+            foreach (VideoConfig existing in Objects)
+            {
+                if (!string.IsNullOrEmpty(existing.URL) &&
+                    Uri.TryCreate(existing.URL, UriKind.Absolute, out Uri existingUri) &&
+                    existingUri.Scheme.Equals("rtmp", StringComparison.OrdinalIgnoreCase))
+                {
+                    port = Math.Max(port, existingUri.Port + 1);
+                }
+            }
+
+            string defaultUrl = $"rtmp://0.0.0.0:{port}";
+            TextPopupNode tn = new TextPopupNode("RTMP Server", "URL", defaultUrl);
+            tn.OnOK += (url) =>
+            {
+                if (!Uri.TryCreate(url, UriKind.Absolute, out Uri uri))
+                {
+                    GetLayer<PopupLayer>().PopupMessage("Invalid URL: " + url);
+                    return;
+                }
+                VideoConfig vs = new VideoConfig();
+                vs.DeviceName = "RTMP Server (" + uri.Port + ")";
+                vs.URL = uri.AbsoluteUri;
+                vs.FrameWork = FrameWork.FFmpeg;
+                AddNew(vs);
+            };
+            GetLayer<PopupLayer>().Popup(tn);
+        }
+
         private void AddURL()
         {
             TextPopupNode tn = new TextPopupNode("RTSP Stream", "URL", "");
@@ -203,6 +235,12 @@ namespace UI.Video
                 VideoConfig vs = new VideoConfig();
                 vs.DeviceName = uri.Host;
                 vs.URL = uri.AbsoluteUri;
+
+                if (vs.IsRTMP)
+                {
+                    vs.FrameWork = FrameWork.FFmpeg;
+                }
+
                 AddNew(vs);
             };
             GetLayer<PopupLayer>().Popup(tn);
@@ -210,6 +248,14 @@ namespace UI.Video
 
         protected override PropertyNode<VideoConfig> CreatePropertyNode(VideoConfig obj, PropertyInfo pi)
         {
+            if (pi.Name == "URL")
+            {
+                if (!obj.IsRTMP)
+                    return null;
+
+                return new RtmpUrlPropertyNode(obj, pi, ButtonBackground, TextColor, ButtonHover);
+            }
+
             if (pi.Name == "VideoMode")
             {
                 return new ModePropertyNode(this, obj, pi, ButtonBackground, TextColor, ButtonHover);
@@ -217,7 +263,7 @@ namespace UI.Video
 
             if (pi.Name == "AnyUSBPort")
             {
-                if (obj.DeviceName == "OBS-Camera")
+                if (obj.DeviceName == "OBS-Camera" || obj.IsRTMP)
                 {
                     return null;
                 }
@@ -397,7 +443,7 @@ namespace UI.Video
                 CheckVisible(propertyNode, Selected);
             }
 
-            if (newChange.PropertyInfo.Name == "VideoMode" || newChange.PropertyInfo.Name == "Flipped" || newChange.PropertyInfo.Name == "RecordVideoForReplays")
+            if (newChange.PropertyInfo.Name == "VideoMode" || newChange.PropertyInfo.Name == "FlipMirrored" || newChange.PropertyInfo.Name == "RecordVideoForReplays")
             {
                 RepairVideoPreview();
             }
@@ -490,6 +536,7 @@ namespace UI.Video
 
             private void AcceptModes(VideoManager.ModesResult result)
             {
+                mutex.Set();
                 modes = TrimModes(result.Modes).DistinctModes().ToArray();
 
                 if (result.RebootRequired)
@@ -504,7 +551,6 @@ namespace UI.Video
 
                 SetOptions(modes);
 
-                mutex.Set();
                 ShowMouseMenu();
             }
 
@@ -1257,6 +1303,50 @@ namespace UI.Video
             }
 
             base.UpdateFromObject();
+        }
+    }
+
+    public class RtmpUrlPropertyNode : StaticTextPropertyNode<VideoConfig>
+    {
+        private readonly VideoConfig videoConfig;
+
+        public RtmpUrlPropertyNode(VideoConfig obj, PropertyInfo pi, Color backgroundColor, Color textColor, Color hoverColor)
+            : base(obj, pi, textColor)
+        {
+            videoConfig = obj;
+
+            TextButtonNode copyButton = new TextButtonNode("Copy", backgroundColor, hoverColor, textColor);
+            copyButton.OnClick += (mie) =>
+            {
+                PlatformTools.Clipboard.SetText(ConnectableUrl);
+            };
+            AddChild(copyButton);
+
+            AlignHorizontally(0.01f, Children.ToArray());
+
+            UpdateFromObject();
+        }
+
+        private string ConnectableUrl
+        {
+            get
+            {
+                string url = videoConfig?.URL ?? "";
+                if (url.Contains("0.0.0.0"))
+                {
+                    string lanIp = System.Net.Dns.GetHostAddresses(System.Net.Dns.GetHostName())
+                        .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+                                          && !System.Net.IPAddress.IsLoopback(a))
+                        ?.ToString() ?? "127.0.0.1";
+                    return url.Replace("0.0.0.0", lanIp);
+                }
+                return url;
+            }
+        }
+
+        public override void UpdateFromObject()
+        {
+            Value.Text = ConnectableUrl;
         }
     }
 

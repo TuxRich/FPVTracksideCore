@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Tools;
 using Composition;
 using RaceLib.Game;
@@ -96,6 +97,20 @@ namespace Sound
         private WorkQueue backgroundQueue;
         private bool backgroundQueueStopping;
 
+        private CancellationTokenSource startCountdownCts;
+
+        private static readonly (int seconds, SoundKey key)[] StartCountdownSchedule =
+        {
+            (8, SoundKey.StartRaceIn8),
+            (5, SoundKey.StartRaceIn5),
+            (4, SoundKey.StartRaceIn4),
+            (3, SoundKey.StartRaceIn3),
+            (2, SoundKey.StartRaceIn2),
+            (1, SoundKey.StartRaceIn1),
+        };
+        
+        public event Action<string> OnSpeech;
+
         public SoundManager(EventManager eventManager, Profile profile)
         {
             this.eventManager = eventManager;
@@ -120,6 +135,8 @@ namespace Sound
             if (em != null)
             {
                 em.RaceManager.OnRaceStart += RaceManager_OnRaceStart;
+                em.RaceManager.OnRaceStartScheduled += RaceManager_OnRaceStartScheduled;
+                em.RaceManager.OnPilotHandicapStart += RaceManager_OnPilotHandicapStart;
                 em.RaceManager.OnRaceEnd += RaceOver;
                 em.RaceManager.OnLapDetected += Lap;
                 em.RaceManager.OnSplitDetection += Sector;
@@ -145,6 +162,9 @@ namespace Sound
         {
             StopSound();
 
+            startCountdownCts?.Dispose();
+            startCountdownCts = null;
+
             backgroundQueue?.Dispose();
             backgroundQueue = null;
 
@@ -152,6 +172,8 @@ namespace Sound
             if (em != null)
             {
                 em.RaceManager.OnRaceStart -= RaceManager_OnRaceStart;
+                em.RaceManager.OnRaceStartScheduled -= RaceManager_OnRaceStartScheduled;
+                em.RaceManager.OnPilotHandicapStart -= RaceManager_OnPilotHandicapStart;
                 em.RaceManager.OnRaceEnd -= RaceOver;
                 em.RaceManager.OnLapDetected -= Lap;
                 em.RaceManager.OnSplitDetection -= Sector;
@@ -183,6 +205,7 @@ namespace Sound
         public void SetupSpeaker(PlatformTools platformTools, string voice, int volume)
         {
             speechManager = new SpeechManager(platformTools, voice, volume);
+            speechManager.OnSpeech += OnSpeech;
         }
 
         public bool HasSpeech()
@@ -193,6 +216,11 @@ namespace Sound
             }
 
             return speechManager.HasSpeech();
+        }
+
+        public bool IsSpeaking
+        {
+            get { return speechManager?.IsSpeaking ?? false; }
         }
 
         public void WaitForInit()
@@ -215,15 +243,29 @@ namespace Sound
                 sounds = new Dictionary<SoundKey, Sound>();
                 try
                 {
-                    Sounds = IOTools.Read<Sound>(Profile, filename);
+                    Sound[] loaded = IOTools.Read<Sound>(Profile, filename);
+                    if (loaded != null)
+                    {
+                        foreach (Sound s in loaded)
+                        {
+                            AddSound(s);
+                        }
+                    }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Logger.SoundLog.LogException(this, ex);
                 }
 
                 Sound[] defaultSounds = new Sound[]
                 {
                     new Sound() { Key = SoundKey.StartRaceIn, TextToSpeech = "Arm your quads. Starting on the tone in less than {time}", Category = Sound.SoundCategories.Race },
+                    new Sound() { Key = SoundKey.StartRaceIn8, TextToSpeech = "8 seconds", Enabled = false, Category = Sound.SoundCategories.Race },
+                    new Sound() { Key = SoundKey.StartRaceIn5, TextToSpeech = "5", Enabled = false, Category = Sound.SoundCategories.Race },
+                    new Sound() { Key = SoundKey.StartRaceIn4, TextToSpeech = "4", Enabled = false, Category = Sound.SoundCategories.Race },
+                    new Sound() { Key = SoundKey.StartRaceIn3, TextToSpeech = "3", Enabled = false, Category = Sound.SoundCategories.Race },
+                    new Sound() { Key = SoundKey.StartRaceIn2, TextToSpeech = "2", Enabled = false, Category = Sound.SoundCategories.Race },
+                    new Sound() { Key = SoundKey.StartRaceIn1, TextToSpeech = "1", Enabled = false, Category = Sound.SoundCategories.Race },
                     new Sound() { Key = SoundKey.RaceStart, TextToSpeech = "Go", Filename = @"sounds/tone.wav", Category = Sound.SoundCategories.Race },
                     new Sound() { Key = SoundKey.RaceOver, TextToSpeech = "Race over", Category = Sound.SoundCategories.Race },
                     new Sound() { Key = SoundKey.RaceResumed, TextToSpeech = "Race Resumed", Category = Sound.SoundCategories.Race },
@@ -288,6 +330,9 @@ namespace Sound
                     new Sound() { Key = SoundKey.EmergencyStop, TextToSpeech = "Emergency Stop, PILOTS LAND NOW!", Category = Sound.SoundCategories.Announcements },
                     new Sound() { Key = SoundKey.Flag, TextToSpeech = "Flagged", Category = Sound.SoundCategories.Announcements },
 
+                    new Sound() { Key = SoundKey.CheckedIn, TextToSpeech = "{pilot} checked in on {channel}", Category = Sound.SoundCategories.Announcements },
+                    new Sound() { Key = SoundKey.InvalidQR, TextToSpeech = "Invalid QR scanned", Category = Sound.SoundCategories.Announcements },
+
                     new Sound() { Key = SoundKey.GamePoint, TextToSpeech = "BEEP", Filename = @"sounds/detection.wav", Category = Sound.SoundCategories.Detection },
                     new Sound() { Key = SoundKey.GamePointsRemaining, TextToSpeech = "{pilots} {points} points remaining",Category = Sound.SoundCategories.Announcements },
                     new Sound() { Key = SoundKey.GameWins, TextToSpeech = "{pilots} has {points} and WINS THE GAME!", Category = Sound.SoundCategories.Announcements },
@@ -351,7 +396,7 @@ namespace Sound
         private void GameManager_OnCapture(Pilot[] pilots, Captured obj)
         {
             SpeechParameters parameters = new SpeechParameters();
-            parameters.Add(SpeechParameters.Types.pilots, pilots.PhoneticNoComma());
+            parameters.Add(SpeechParameters.Types.pilots, pilots);
             parameters.Add(SpeechParameters.Types.count, obj.TimingSystemIndex + 1);
 
             PlaySound(SoundKey.GameCaptured, parameters);
@@ -360,7 +405,7 @@ namespace Sound
         private void OnGamePointsRemaining(Pilot[] pilots, Team team, int pointsRemaining)
         {
             SpeechParameters parameters = new SpeechParameters();
-            parameters.Add(SpeechParameters.Types.pilots, pilots.PhoneticNoComma());
+            parameters.Add(SpeechParameters.Types.pilots, pilots);
             parameters.Add(SpeechParameters.Types.points, pointsRemaining);
 
             PlaySound(SoundKey.GamePointsRemaining, parameters);
@@ -372,22 +417,69 @@ namespace Sound
 
             SpeechParameters parameters = new SpeechParameters();
             parameters.Priority = 10000;
-            parameters.Add(SpeechParameters.Types.pilots, pilots.PhoneticNoComma());
+            parameters.Add(SpeechParameters.Types.pilots, pilots);
             parameters.Add(SpeechParameters.Types.points, points);
             PlaySound(SoundKey.GameWins, parameters);
         }
 
         private void RaceManager_OnRaceStart(Race race)
         {
-            if (!eventManager.RaceManager.StaggeredStart)
+            if (eventManager.RaceManager.StaggeredStart)
+                return;
+
+            // Suppress the global "GO" for handicap races — per-pilot cues fire individually.
+            if (race != null && race.Round != null && race.Round.Handicapped)
+                return;
+
+            Start();
+        }
+
+        private void RaceManager_OnPilotHandicapStart(Race race, Pilot pilot)
+        {
+            if (pilot == null)
+                return;
+
+            SpeechParameters sp = new SpeechParameters();
+            sp.Add(SpeechParameters.Types.pilot, pilot);
+            sp.Priority = 9500;
+            sp.SecondsExpiry = 2;
+
+            PlaySound(SoundKey.StaggeredPilot, sp);
+        }
+
+        private void RaceManager_OnRaceStartScheduled(Race race, DateTime startTime)
+        {
+            // Swap in the new CTS before cancelling the old one — StopSound can be called
+            // from another thread at any time, so the field must never point to a disposed object.
+            CancellationTokenSource oldCts = startCountdownCts;
+            startCountdownCts = new CancellationTokenSource();
+            oldCts?.Cancel();
+            oldCts?.Dispose();
+
+            CancellationToken token = startCountdownCts.Token;
+            foreach ((int seconds, SoundKey key) in StartCountdownSchedule)
             {
-                Start();
+                DateTime fireAt = startTime - TimeSpan.FromSeconds(seconds);
+                TimeSpan delay = fireAt - DateTime.Now;
+                if (delay <= TimeSpan.Zero)
+                    continue;
+
+                SoundKey capturedKey = key;
+                Task.Delay(delay, token).ContinueWith(t =>
+                {
+                    if (t.IsCanceled)
+                        return;
+
+                    SpeechParameters parameters = new SpeechParameters();
+                    parameters.Priority = 9500;
+                    parameters.SecondsExpiry = 1;
+                    PlaySound(capturedKey, parameters);
+                }, TaskScheduler.Default);
             }
         }
 
         private void OnRaceChanged(Race race)
         {
-            StopSound();
             if (race != null && eventManager.RaceManager.CanRunRace)
             {
                 AnnounceRace(race);
@@ -458,7 +550,7 @@ namespace Sound
                     SpeechParameters pilotChannelParameters = new SpeechParameters();
                     pilotChannelParameters.Priority = 1000;
                     pilotChannelParameters.SecondsExpiry = 60;
-                    pilotChannelParameters.Add(SpeechParameters.Types.pilot, pc.Pilot.Phonetic);
+                    pilotChannelParameters.Add(SpeechParameters.Types.pilot, pc.Pilot);
 
                     if (pc.Channel.UIDisplayName != pc.Channel.GetBandChannelText())
                     {
@@ -496,7 +588,7 @@ namespace Sound
             SpeechParameters pilotChannelParameters = new SpeechParameters();
             pilotChannelParameters.Priority = 1000;
             pilotChannelParameters.SecondsExpiry = 5;
-            pilotChannelParameters.Add(SpeechParameters.Types.pilots, nextRace.Pilots.Phonetic);
+            pilotChannelParameters.Add(SpeechParameters.Types.pilots, nextRace.Pilots);
 
             PlaySoundBlocking(SoundKey.InTheHole,  pilotChannelParameters);
         }
@@ -560,7 +652,7 @@ namespace Sound
                         continue;
 
                     SpeechParameters pilotChannelParameters = new SpeechParameters();
-                    pilotChannelParameters.Add(SpeechParameters.Types.pilot, result.Pilot.Phonetic);
+                    pilotChannelParameters.Add(SpeechParameters.Types.pilot, result.Pilot);
                     pilotChannelParameters.Add(SpeechParameters.Types.position, result.DNF ? "DNF" : result.Position);
 
                     if (backgroundQueueStopping)
@@ -579,7 +671,7 @@ namespace Sound
             SpeechParameters parameters = new SpeechParameters();
             parameters.Priority = 1000;
             parameters.SecondsExpiry = 30;
-            parameters.Add(SpeechParameters.Types.pilot, pilot.Phonetic);
+            parameters.Add(SpeechParameters.Types.pilot, pilot);
             parameters.Add(SpeechParameters.Types.band, channel.GetSpokenBandLetter());
             parameters.Add(SpeechParameters.Types.channel, channel.Number);
 
@@ -606,12 +698,12 @@ namespace Sound
 
         public void HurryUp(Pilot p)
         {
-            PlaySound(SoundKey.HurryUp, new SpeechParameters(SpeechParameters.Types.pilot, p.Phonetic));
+            PlaySound(SoundKey.HurryUp, new SpeechParameters(SpeechParameters.Types.pilot, p));
         }
 
         public void SpeakName(Pilot obj)
         {
-            PlaySound(SoundKey.NameTest, new SpeechParameters(SpeechParameters.Types.pilot, obj.Phonetic));
+            PlaySound(SoundKey.NameTest, new SpeechParameters(SpeechParameters.Types.pilot, obj));
         }
 
         public void SponsorRead(string text, TimeSpan expiry)
@@ -631,7 +723,7 @@ namespace Sound
             parameters.Priority = 0;
             parameters.Add(SpeechParameters.Types.speedunits, units);
             parameters.Add(SpeechParameters.Types.speed, speed);
-            parameters.Add(SpeechParameters.Types.pilot, split.Pilot.Phonetic);
+            parameters.Add(SpeechParameters.Types.pilot, split.Pilot);
 
             PlaySound(SoundKey.Speed, parameters);
         }
@@ -651,6 +743,7 @@ namespace Sound
         public void StopSound()
         {
             backgroundQueueStopping = true;
+            startCountdownCts?.Cancel();
             speechManager?.StopSpeech();
         }
 
@@ -822,11 +915,14 @@ namespace Sound
             parameters.Priority = 0;
             if (lap.Pilot.SillyName == null)
             {
-                parameters.Add(SpeechParameters.Types.pilot, lap.Pilot.Phonetic);
+                parameters.Add(SpeechParameters.Types.pilot, lap.Pilot);
             }
             else
             {
-                parameters.Add(SpeechParameters.Types.pilot, new Random().NextDouble() < SillyNameChance ? lap.Pilot.SillyName : lap.Pilot.Phonetic);
+                if (new Random().NextDouble() < SillyNameChance)
+                    parameters.Add(SpeechParameters.Types.pilot, lap.Pilot.SillyName);
+                else
+                    parameters.Add(SpeechParameters.Types.pilot, lap.Pilot);
             }
             parameters.Add(SpeechParameters.Types.lapnumber, lap.Number.ToString());
             parameters.Add(SpeechParameters.Types.count, validLaps.Length);
@@ -934,7 +1030,7 @@ namespace Sound
             StopSound();
 
             SpeechParameters sp = new SpeechParameters();
-            sp.Add(SpeechParameters.Types.pilot, pilotChannel.Pilot.Phonetic);
+            sp.Add(SpeechParameters.Types.pilot, pilotChannel.Pilot);
             sp.Add(SpeechParameters.Types.channel, pilotChannel.Channel);
             sp.Priority = 1000;
             sp.SecondsExpiry = 120;
@@ -959,7 +1055,7 @@ namespace Sound
                 int position = race.GetTrackPosition(pilot);
 
                 SpeechParameters parameters = new SpeechParameters();
-                parameters.Add(SpeechParameters.Types.pilot, pilot.Phonetic);
+                parameters.Add(SpeechParameters.Types.pilot, pilot);
                 parameters.Add(SpeechParameters.Types.count, detection.SectorNumber.ToString());
                 parameters.Add(SpeechParameters.Types.position, position);
                 parameters.Priority = LapNumberToPriority(detection, position);
@@ -972,7 +1068,7 @@ namespace Sound
         {
             SpeechParameters parameters = new SpeechParameters();
             parameters.Priority = 1000;
-            parameters.Add(SpeechParameters.Types.pilot, pilot.Phonetic);
+            parameters.Add(SpeechParameters.Types.pilot, pilot);
             parameters.Add(SpeechParameters.Types.count, laps.Length.ToString());
             parameters.Add(SpeechParameters.Types.lapstime, laps.TotalTime());
             parameters.Add(SpeechParameters.Types.s, laps.Length == 1 ? "" : "s");
@@ -1057,7 +1153,7 @@ namespace Sound
             StopSound();
 
             SpeechParameters soundParameters = new SpeechParameters();
-            soundParameters.Add(SpeechParameters.Types.pilot, pilot.Phonetic);
+            soundParameters.Add(SpeechParameters.Types.pilot, pilot);
             soundParameters.Priority = 1111;
             soundParameters.SecondsExpiry = 10;
             PlaySound(SoundKey.VideoDelayingRace, soundParameters);
@@ -1078,6 +1174,19 @@ namespace Sound
         {
             StopSound();
             PlaySound(SoundKey.EmergencyStop);
+        }
+
+        public void QRCheckedIn(Pilot pilot, Channel channel)
+        {
+            SpeechParameters soundParameters = new SpeechParameters();
+            soundParameters.Add(SpeechParameters.Types.pilot, pilot);
+            soundParameters.Add(SpeechParameters.Types.channel, channel.UIDisplayName);
+            PlaySound(SoundKey.CheckedIn, soundParameters);
+        }
+
+        public void QRCheckedInNotAPilot()
+        {
+            PlaySound(SoundKey.InvalidQR);
         }
     }
 

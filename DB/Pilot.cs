@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -22,6 +22,8 @@ namespace DB
 
         public string DiscordID { get; set; }
 
+        public string VelocidroneUID { get; set; }
+
         public string Aircraft { get; set; }
 
         public string CatchPhrase { get; set; }
@@ -36,7 +38,10 @@ namespace DB
         public bool VideoFlipped { get; set; }
         public bool VideoMirrored { get; set; }
 
-        public Pilot() { }
+        public Pilot()
+        {
+            TimingSensitivityPercent = 100;
+        }
 
         public Pilot(RaceLib.Pilot obj)
             : base(obj)

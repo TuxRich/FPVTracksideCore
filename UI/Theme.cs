@@ -1,4 +1,4 @@
-using Microsoft.Xna.Framework.Graphics;
+﻿using Microsoft.Xna.Framework.Graphics;
 using RaceLib;
 using System;
 using System.Collections.Generic;
@@ -29,6 +29,7 @@ namespace UI
         public string FontFamily { get; set; }
         public ToolTexture Background { get; set; }
         public ToolTexture FPVTracksideLogo { get; set; }
+        public ToolTexture RaceStartGraphic { get; set; }
 
         public ToolColor TextAlt { get; set; }
         public ToolColor TextMain { get; set; }
@@ -45,6 +46,9 @@ namespace UI
 
         public ToolColor PanelAlt { get; set; }
         public ToolColor Panel { get; set; }
+
+        public ToolTexture SubtitleBackground { get; set; }
+        public ToolColor SubtitleText { get; set; }
 
         public ToolColor ScrollBar { get; set; }
                 
@@ -89,6 +93,7 @@ namespace UI
             Tabs = new PanelTheme();
 
             FPVTracksideLogo = new ToolTexture(@"img\logo.png", 0, 0, 0, 0);
+            RaceStartGraphic = new ToolTexture(@"racestart.png", 0, 0, 0, 0);
 
             PilotViewTheme = new PilotTheme();
 
@@ -131,123 +136,118 @@ namespace UI
             PilotProfileMask = null;
         }
 
-        private static DirectoryInfo themesDir;
-        private static GraphicsDevice graphicsDeviceRef;
-        private static List<Theme> themes;
+        public static List<Theme> Themes { get; private set; }
 
-        public static List<Theme> Themes
+        public static IEnumerable<Theme> Load(DirectoryInfo directoryInfo, GraphicsDevice graphicsDevice)
         {
-            get
+            KeyValuePair<string, string>[] replacements = new KeyValuePair<string, string>[]
             {
-                if (themes == null)
-                {
-                    themes = new List<Theme>();
-                    if (themesDir != null && graphicsDeviceRef != null)
-                    {
-                        themes.AddRange(LoadAll(themesDir, graphicsDeviceRef));
-                    }
-                }
-                return themes;
-            }
-            private set { themes = value; }
-        }
+                new KeyValuePair<string, string>("PBPage", "InfoPanel"),
+            };
 
-        private static KeyValuePair<string, string>[] ThemeXmlReplacements = new KeyValuePair<string, string>[]
-        {
-            new KeyValuePair<string, string>("PBPage", "InfoPanel"),
-        };
 
-        private static Theme LoadFromDirectory(DirectoryInfo directory, GraphicsDevice graphicsDevice)
-        {
-            FileInfo themeFile = new FileInfo(Path.Combine(directory.FullName, "theme.xml"));
-            if (themeFile.Exists)
-            {
-                try
-                {
-                    Theme theme = IOTools.Read<Theme>(directory.FullName, themeFile.Name, ThemeXmlReplacements).FirstOrDefault();
-                    theme.Name = directory.Name;
-                    theme.Directory = directory;
-                    theme.Upgrade();
-                    theme.Repair();
-                    return theme;
-                }
-                catch
-                {
-                }
-            }
-
-            FileInfo theme2File = new FileInfo(Path.Combine(directory.FullName, "theme2.xml"));
-            if (theme2File.Exists)
-            {
-                try
-                {
-                    Theme2 theme2 = IOTools.Read<Theme2>(directory.FullName, theme2File.Name, ThemeXmlReplacements).FirstOrDefault();
-                    theme2.Name = directory.Name;
-                    theme2.Directory = directory;
-                    return theme2.ToTheme(graphicsDevice, new Theme());
-                }
-                catch
-                {
-                }
-            }
-
-            return null;
-        }
-
-        private static IEnumerable<Theme> LoadAll(DirectoryInfo directoryInfo, GraphicsDevice graphicsDevice)
-        {
             foreach (DirectoryInfo directory in directoryInfo.GetDirectories("*"))
             {
-                Theme theme = LoadFromDirectory(directory, graphicsDevice);
-                if (theme != null)
+                FileInfo themeFile = new FileInfo(Path.Combine(directory.FullName, "theme.xml"));
+                if (themeFile.Exists)
+                {
+                    Theme theme;
+                    try
+                    {
+                        theme = IOTools.Read<Theme>(directory.FullName, themeFile.Name, replacements).FirstOrDefault();
+                        theme.Name = directory.Name;
+                        theme.Directory = directory;
+
+                        theme.Upgrade();
+                        theme.Repair();
+
+                        IOTools.Write(directory.FullName, themeFile.Name, theme);
+
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
                     yield return theme;
+                }
+
+                //if (directory.Name == "NewDark")
+                //{
+                //    Theme2 theme2 = new Theme2();
+                //    FileInfo theme2Fil2e = new FileInfo(directory.FullName + "/theme2.xml");
+                //    IOTools.Write(directory.FullName, theme2Fil2e.Name, theme2);
+                //}
+
+                FileInfo theme2File = new FileInfo(Path.Combine(directory.FullName,"theme2.xml"));
+                if (theme2File.Exists)
+                {
+                    Theme2 theme2;
+
+                    Theme theme = null;
+
+                    try
+                    {
+                        theme2 = IOTools.Read<Theme2>(directory.FullName, theme2File.Name, replacements).FirstOrDefault();
+                        theme2.Name = directory.Name;
+                        theme2.Directory = directory;
+
+                        IOTools.Write(directory.FullName, theme2File.Name, theme2);
+
+                        theme = theme2.ToTheme(graphicsDevice, new Theme());
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (theme != null)
+                    {
+                        yield return theme;
+                    }
+                }
             }
         }
 
         public static void Initialise(GraphicsDevice gd, DirectoryInfo workingDirectory, string name)
         {
-            string targetName = ApplicationProfileSettings.Instance?.Theme ?? name;
+            List<Theme> themes = new List<Theme>();
 
-            if (Current != null && Current.Name == targetName)
-                return;
+            DirectoryInfo themesDirectory = new DirectoryInfo(Path.Combine(workingDirectory.FullName, "themes"));
 
-            themesDir = new DirectoryInfo(Path.Combine(workingDirectory.FullName, "themes"));
-            graphicsDeviceRef = gd;
-            themes = null;
+            themes.AddRange(Load(themesDirectory, gd));
 
-            if (themesDir.Exists)
+            Themes = themes.ToList();
+
+            Theme oldCurrent = Current;
+
+            if (ApplicationProfileSettings.Instance != null)
             {
-                DirectoryInfo targetDir = new DirectoryInfo(Path.Combine(themesDir.FullName, targetName));
-                if (targetDir.Exists)
-                {
-                    Current = LoadFromDirectory(targetDir, gd);
-                }
+                Current = Themes.FirstOrDefault(t => t.Name == ApplicationProfileSettings.Instance.Theme);
+            }
 
-                if (Current == null && targetName != name)
-                {
-                    targetDir = new DirectoryInfo(Path.Combine(themesDir.FullName, name));
-                    if (targetDir.Exists)
-                    {
-                        Current = LoadFromDirectory(targetDir, gd);
-                    }
-                }
+            if (Current == null)
+            {
+                Current = oldCurrent;
+            }
 
-                if (Current == null)
-                {
-                    targetDir = new DirectoryInfo(Path.Combine(themesDir.FullName, "FPVTrackside"));
-                    if (targetDir.Exists)
-                    {
-                        Current = LoadFromDirectory(targetDir, gd);
-                    }
-                }
+            if (Current == null)
+            {
+                Current = Themes.FirstOrDefault(t => t.Name == name);
+            }
 
-                if (Current == null)
-                {
-                    Current = LoadAll(themesDir, gd).FirstOrDefault();
-                }
+            if (Current == null)
+            {
+                Current = Themes.FirstOrDefault(t => t.Name == "FPVTrackside");
+            }
+
+            if (Current == null)
+            {
+                Current = Themes.FirstOrDefault();
             }
 
             Logger.UI.LogCall(Current, "Theme.Init");
+
 
             if (Current == null)
             {
@@ -267,6 +267,11 @@ namespace UI
             if (EventSelectorTop == null)
                 EventSelectorTop = new ToolTexture(TopPanel.R, TopPanel.G, TopPanel.B, TopPanel.A);
 
+            if (SubtitleBackground == null)
+                SubtitleBackground = new ToolTexture(RightControls.Background);
+
+            if (SubtitleText == null)
+                SubtitleText = new ToolColor(RightControls.Text.XNA);
         }
 
 

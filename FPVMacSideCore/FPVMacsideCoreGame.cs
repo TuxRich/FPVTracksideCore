@@ -22,7 +22,7 @@ namespace FPVMacsideCore
         public FPVMacsideCoreGame()
             :base(new MacPlatformTools())
         {
-          
+            Platform.SetGame(this);
         }
 
         protected override void Update(GameTime gameTime)
@@ -37,7 +37,7 @@ namespace FPVMacsideCore
             FfmpegMediaPlatform.FfmpegGlobalInitializer.Initialize();
 
             Theme.Initialise(GraphicsDevice, PlatformTools.WorkingDirectory, "Dark");
-            DirectoryInfo eventDir = new DirectoryInfo(ApplicationProfileSettings.Instance.EventStorageLocation);
+            DirectoryInfo eventDir = ApplicationProfileSettings.Instance.EventStorageDirectory;
             DatabaseFactory.Init(new DB.DatabaseFactory(Data, eventDir));
 
 

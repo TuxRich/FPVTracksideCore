@@ -140,6 +140,19 @@ namespace Timing.RotorHazard
 
         public string prog_start_epoch { get; set; }
         public string prog_start_time { get; set; }
+
+        // The FPVTrackSide connector plugin's own version (manifest.json), not RH core's - what
+        // actually determines whether a given feature (e.g. marshalling) is supported, since
+        // that's plugin code we control independently of the RH release itself. Null on any
+        // plugin build predating this field.
+        public string plugin_version { get; set; }
+    }
+
+    // Sent to ts_event_info, once whenever the event loads/changes (not per-race) - separate
+    // from RaceStartPilots, which carries per-race data on every ts_race_stage.
+    public struct EventInfo
+    {
+        public string name { get; set; }
     }
 
     public struct RaceStartPilots
@@ -172,6 +185,43 @@ namespace Timing.RotorHazard
         public double lap_time { get; set; }
         public string lap_time_formatted { get; set; }
         public double lap_time_stamp { get; set; }
+    }
+
+    // Outbound counterpart of RaceMarshalData/RaceMarshalLap, sent to ts_race_marshal_update.
+    // lap_time_formatted is omitted - the RH-side handler formats it itself from lap_time.
+    public struct RaceMarshalUpdate
+    {
+        public Guid race_id { get; set; }
+        public Guid pilot_id { get; set; }
+        public List<RaceMarshalUpdateLap> laps { get; set; }
+    }
+
+    public struct RaceMarshalUpdateLap
+    {
+        public bool deleted { get; set; }
+        public double lap_time { get; set; }
+        public double lap_time_stamp { get; set; }
+    }
+
+    // Sent to ts_race_marshal_waveform to request the raw RSSI trace + calibration for a pilot
+    // run, so it can be plotted/recalculated locally before any correction is committed.
+    public struct RaceMarshalWaveformRequest
+    {
+        public Guid race_id { get; set; }
+        public Guid pilot_id { get; set; }
+    }
+
+    // Ack response to ts_race_marshal_waveform. history_times/race_start_time are both on RH's
+    // internal monotonic clock (see RHRace.py's start_time_monotonic) - history_times[i] -
+    // race_start_time gives a race-relative offset directly, with no wall-clock/epoch involved.
+    // null (all default values) when RH has no waveform for that race/pilot.
+    public struct RaceMarshalWaveformResponse
+    {
+        public double[] history_values { get; set; }
+        public double[] history_times { get; set; }
+        public int enter_at { get; set; }
+        public int exit_at { get; set; }
+        public double race_start_time { get; set; }
     }
 }
 

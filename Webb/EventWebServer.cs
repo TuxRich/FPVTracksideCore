@@ -43,7 +43,7 @@ namespace Webb
 
         public EventWebServer(EventManager eventManager, SoundManager soundManager, IRaceControl raceControl, IEnumerable<Tools.ToolColor> channelColors, string eventStorageLocation = null)
         {
-            CSSStyleSheet = new FileInfo(Path.Combine("httpfiles", "style.css"));
+            CSSStyleSheet = new FileInfo(IOTools.ResolveFromWorkingDirectory("httpfiles", "style.css"));
             this.eventManager = eventManager;
             this.soundManager = soundManager;
             this.raceControl = raceControl;
@@ -193,12 +193,26 @@ namespace Webb
                 DirectoryInfo eventRoot = new DirectoryInfo(Path.Combine(eventsPath, eventManager.Event.ID.ToString()));
                 switch (action)
                 {
+                    case "current":
+                        // The operator's currently-selected race (RaceManager.CurrentRace),
+                        // so an external dashboard/agent can show the cued heat before it
+                        // starts — even when races are run out of order. Surfaced while the
+                        // race is still live (un-run or running); an already-finished race
+                        // returns null so reviewing past results doesn't move "current".
+                        {
+                            RaceLib.Race cur = eventManager.RaceManager.CurrentRace;
+                            Guid? curId = (cur != null && !cur.Ended) ? (Guid?)cur.ID : null;
+                            context.Response.ContentType = "application/json";
+                            return Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(new { CurrentRace = curId }));
+                        }
                     case "events":
                         // Build the full path: replace "events" prefix with the actual event storage location
                         string[] pathWithoutEvents = requestPath.Skip(1).ToArray(); // Remove "events" from the path
                         string target = Path.Combine(eventsPath, Path.Combine(pathWithoutEvents));
 
+#if DEBUG
                         Logger.HTTP.Log(this, "Request: " + path + " -> Target: " + target + " (EventsPath: " + eventsPath + ")");
+#endif
 
                         if (target == eventsPath || string.IsNullOrEmpty(target))
                             target = eventRoot.FullName;
@@ -212,10 +226,14 @@ namespace Webb
                                 {
                                     context.Response.ContentType = "application/json";
                                 }
+#if DEBUG
                                 Logger.HTTP.Log(this, "Serving file: " + target);
+#endif
                                 return File.ReadAllBytes(target);
                             }
+#if DEBUG
                             Logger.HTTP.Log(this, "File not found: " + target);
+#endif
                             return new byte[0];
                         }
                         else
@@ -235,9 +253,12 @@ namespace Webb
             }
 
 
-            FileInfo file = new FileInfo(Path.Combine(requestPath));
+            FileInfo file = new FileInfo(IOTools.ResolveFromWorkingDirectory(requestPath));
 
 #if DEBUG
+            // Deliberately left relative to the current directory: this walks up out of the
+            // build output into the source tree, so it must not be resolved against
+            // WorkingDirectory.
             string[] basehttpFilesDir = new string[] { "..", "..", "..", "..", "..", "..", "..","FPVTracksideCore","Webb" };
 
             string combined = Path.Combine(Path.Combine(basehttpFilesDir), Path.Combine(requestPath));
@@ -252,7 +273,7 @@ namespace Webb
             if (!file.Exists)
             {
                 requestPath = new string[] { "httpfiles", "index.html" };
-                file = new FileInfo(Path.Combine(requestPath));
+                file = new FileInfo(IOTools.ResolveFromWorkingDirectory(requestPath));
                 if (!file.Exists)
                 {
                     return new byte[0];

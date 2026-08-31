@@ -1,4 +1,4 @@
-﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -35,6 +35,7 @@ namespace RaceLib
                 phonetic = value;
             }
         }
+
 
         [Category("Name")]
         public string FirstName { get; set; }
@@ -73,7 +74,10 @@ namespace RaceLib
         public bool VideoMirrored { get; set; }
 
         [Category("Advanced")]
+        [DisplayName("Velocidrone UID")]
+        public string VelocidroneUID { get; set; }
 
+        [Category("Advanced")]
         public int MultiGP_ID
         {
             get
@@ -95,8 +99,17 @@ namespace RaceLib
 
         private void AutoPhonetic(string name)
         {
-            name = System.Text.RegularExpressions.Regex.Replace(name, "[^a-zA-Z0-9 ]", " ", System.Text.RegularExpressions.RegexOptions.Compiled);
-            phonetic = name.Trim();
+            // \p{L} = any Unicode letter, \p{N} = any Unicode number — preserves non-Latin names (Japanese, Cyrillic, etc.)
+            string cleaned = System.Text.RegularExpressions.Regex.Replace(name, @"[^\p{L}\p{N} ]", " ").Trim();
+            // quotes group multi-word names so TTS doesn't blend them into the surrounding sentence
+            if (cleaned.Contains(' '))
+            {
+                phonetic = "'" + cleaned + "'";
+            }
+            else
+            {
+                phonetic = cleaned;
+            }
         }
 
         public Pilot()

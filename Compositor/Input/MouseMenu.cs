@@ -101,6 +101,11 @@ namespace Composition.Input
             }
         }
 
+        public MouseMenu AddEnumSubmenu<T>(string text, Action<T> action) where T : Enum
+        {
+            return AddSubmenu<T>(text, action, (T[])Enum.GetValues(typeof(T)));
+        }
+
         public MouseMenu AddSubmenu<T>(string text, Action<T> action, params T[] values)
         {
             MouseMenu mouseMenu = new MouseMenu(MenuLayer);
@@ -154,10 +159,25 @@ namespace Composition.Input
 
             MenuItem newItem = new MenuItem(text, MenuLayer.Background, MenuLayer.Hover, MenuLayer.Text);
             newItem.TextNode.Alignment = RectangleAlignment.CenterLeft;
-            newItem.OnClick += (mie) => 
-            { 
+            newItem.OnClick += (mie) =>
+            {
                 action();
-                Close(); 
+                Close();
+            };
+            listNode.AddChild(newItem);
+            return newItem;
+        }
+
+        public CheckboxMenuItem AddCheckboxItem(string text, bool value, Action<bool> onChange)
+        {
+            text = Translator.Get("Menu." + text, text);
+
+            CheckboxMenuItem newItem = new CheckboxMenuItem(text, MenuLayer.Background, MenuLayer.Hover, MenuLayer.Text, value);
+            newItem.TextNode.Alignment = RectangleAlignment.CenterLeft;
+            newItem.OnClick += (mie) =>
+            {
+                newItem.Checkbox.Value = !newItem.Checkbox.Value;
+                onChange(newItem.Checkbox.Value);
             };
             listNode.AddChild(newItem);
             return newItem;
@@ -415,9 +435,27 @@ namespace Composition.Input
 
     public class MenuItem : TextButtonNode
     {
-        public MenuItem(string text, Color background, Color hover, Color textColor) 
+        public MenuItem(string text, Color background, Color hover, Color textColor)
             : base(text, background, hover, textColor)
         {
+        }
+    }
+
+    public class CheckboxMenuItem : MenuItem
+    {
+        public CheckboxNode Checkbox { get; private set; }
+
+        public CheckboxMenuItem(string text, Color background, Color hover, Color textColor, bool value)
+            : base(text, background, hover, textColor)
+        {
+            TextNode.RelativeBounds = new RectangleF(0.05f, 0.17f, 0.75f, 0.73f);
+
+            Checkbox = new CheckboxNode();
+            Checkbox.Tint = textColor;
+            Checkbox.Value = value;
+            Checkbox.Locked = true;
+            Checkbox.RelativeBounds = new RectangleF(0.83f, 0.1f, 0.12f, 0.8f);
+            AddChild(Checkbox);
         }
     }
 

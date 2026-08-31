@@ -7,6 +7,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using RaceLib;
+using Sound;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -20,7 +21,6 @@ using Tools;
 using UI;
 using UI.Nodes;
 using UI.Nodes.Rounds;
-using UI.Sponsor;
 using UI.Video;
 using Webb;
 
@@ -28,15 +28,18 @@ namespace UI
 {
     public class BaseGame : LayerStackGameBackgroundThread
     {
+        protected virtual string DefaultTheme => "FPVTrackside";
+
         protected EventLayer eventLayer;
 
         protected LoadingLayer loadingLayer;
 
         private Mutex mutex;
+        private bool mutexAcquired;
 
         private bool hasEverShownEventSelector;
 
-        public Texture2D Banner { get; private set; }
+        public Texture2D Banner { get; protected set; }
 
         public WorkQueue Background { get; private set; }
 
@@ -46,7 +49,6 @@ namespace UI
         public DirectoryInfo Data { get; private set; }
         public DirectoryInfo Themes { get; private set; }
         public DirectoryInfo Video { get; private set; }
-        public DirectoryInfo Sponsors { get; private set; }
         public DirectoryInfo Pilots { get; private set; }
         public DirectoryInfo Patreons { get; private set; }
         public DirectoryInfo HTTPFiles { get; private set; }
@@ -69,7 +71,6 @@ namespace UI
             Data = CreateDirectory(platformTools.WorkingDirectory, "data");
             Themes = CreateDirectory(platformTools.WorkingDirectory, "themes");
             Video = CreateDirectory(platformTools.WorkingDirectory, "video");
-            Sponsors = CreateDirectory(platformTools.WorkingDirectory, "sponsors");
             Pilots = CreateDirectory(platformTools.WorkingDirectory, "pilots");
             Patreons = CreateDirectory(platformTools.WorkingDirectory, "patreons");
             HTTPFiles = CreateDirectory(platformTools.WorkingDirectory, "httpfiles");
@@ -120,15 +121,35 @@ namespace UI
             Logger.UI.Log(this, this.ToString(), "Dispose");
 
             Background.Dispose();
-            
-            base.Dispose(disposing);
+
+            try
+            {
+                base.Dispose(disposing);
+            }
+            catch (Exception ex)
+            {
+                // MonoGame bug: Effect.Dispose can throw NullReferenceException during GraphicsDevice cleanup
+                Logger.UI.LogException(this, ex);
+            }
+
             Tools.Logger.CleanUp();
 
-            if (alreadyRunning == null)
+            if (mutexAcquired)
             {
-                mutex.ReleaseMutex();
+                try
+                {
+                    mutex.ReleaseMutex();
+                }
+                catch (ApplicationException)
+                {
+                }
                 mutex.Dispose();
             }
+        }
+
+        protected virtual void InitializeProfileSettings(Profile profile)
+        {
+            ApplicationProfileSettings.Initialize(profile);
         }
 
         protected override void Initialize()
@@ -136,13 +157,18 @@ namespace UI
             GeneralSettings.Initialise();
 
             Profile = new Profile(PlatformTools.WorkingDirectory, GeneralSettings.Instance.Profile);
-            ApplicationProfileSettings.Initialize(Profile);
+            InitializeProfileSettings(Profile);
+
+            // ShownDecimalPlaces is [NeedsRestart], so a single startup-time copy
+            // into SpeechParameters is enough for every TTS call site.
+            SpeechParameters.DecimalPlaces = ApplicationProfileSettings.Instance.ShownDecimalPlaces;
 
             if (!ApplicationProfileSettings.Instance.UseDirectX9)
             {
                 GraphicsDeviceManager.GraphicsProfile = GraphicsProfile.HiDef;
             }
             GraphicsDeviceManager.SynchronizeWithVerticalRetrace = ApplicationProfileSettings.Instance.VSync;
+            GraphicsDeviceManager.PreferMultiSampling = ApplicationProfileSettings.Instance.AntiAliasing;
             GraphicsDeviceManager.ApplyChanges();
 
             Window.Position = new Point(Math.Max(Window.Position.X, 0), Math.Max(Window.Position.Y, 0));
@@ -184,14 +210,14 @@ namespace UI
             LayerStack.Add(dragLayer);
             LayerStack.Add(loadingLayer);
 
-            LayerStack.Add(new SponsorLayer(GraphicsDevice));
 #if DEBUG
             LayerStack.Add(new TestLayer(GraphicsDevice, popupLayer));
 #endif
             bool waitingOnMutex;
             try
             {
-                waitingOnMutex = !mutex.WaitOne(TimeSpan.Zero);
+                mutexAcquired = mutex.WaitOne(TimeSpan.Zero);
+                waitingOnMutex = !mutexAcquired;
             }
             catch
             {
@@ -208,7 +234,6 @@ namespace UI
             TargetElapsedTime = TimeSpan.FromSeconds(1f / frameRate);
             IsFixedTimeStep = true;
 
-            
             loadingLayer.WorkQueue.Enqueue("Database Upgrade", DatabaseUpgrade);
 
             loadingLayer.WorkQueue.Enqueue("Load Translations", LoadTranslations);
@@ -275,7 +300,7 @@ namespace UI
             return new EventSelectorEditor(Banner, Profile);
         }
 
-        public void ShowWelcomeSetup()
+        public virtual void ShowWelcomeSetup()
         {
             Logger.UI.LogCall(this);
 
@@ -308,7 +333,10 @@ namespace UI
             SimpleEvent selected = editor.Selected;
 
             if (selected == null)
-                selected = editor.Objects.First();
+                selected = editor.Objects.FirstOrDefault();
+
+            if (selected == null)
+                return;
 
             StartEvent(selected.ID, editor.Profile);
         }
@@ -337,12 +365,18 @@ namespace UI
             }
         }
 
+        protected virtual EventManager CreateEventMananger(Profile profile)
+        {
+            return new VideoEventManager(profile); ;
+        }
+
+
         private void StartEvent(Guid eventId, Profile profile)
         {
             loadingLayer.BlockOnLoading = true;
 
             BackgroundLayer backgroundLayer = LayerStack.GetLayer<BackgroundLayer>();
-            EventManager eventManager = new EventManager(profile);
+            EventManager eventManager = CreateEventMananger(profile);
 
             WorkSet startEventWorkSet = new WorkSet();
             startEventWorkSet.OnError += ErrorLoadingEvent;
@@ -360,12 +394,12 @@ namespace UI
             loadingLayer.WorkQueue.Enqueue(startEventWorkSet, "Loading Settings", () =>
             {
                 // Re-init the following settings so settings windows can reload event to reload settings.
-                ApplicationProfileSettings.Initialize(Profile);
+                InitializeProfileSettings(Profile);
             });
 
             loadingLayer.WorkQueue.Enqueue(startEventWorkSet, "Loading Theme", () =>
             {
-                Theme.Initialise(GraphicsDevice, PlatformTools.WorkingDirectory, "FPVTrackside");
+                Theme.Initialise(GraphicsDevice, PlatformTools.WorkingDirectory, DefaultTheme);
 
                 if (backgroundLayer != null)
                 {

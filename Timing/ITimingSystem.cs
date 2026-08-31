@@ -1,4 +1,4 @@
-﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -7,8 +7,10 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
 using Timing.Chorus;
+using Timing.ELRS;
 using Timing.ImmersionRC;
 using Timing.RotorHazard;
+using Timing.Velocidrone;
 using Tools;
 
 namespace Timing
@@ -23,6 +25,7 @@ namespace Timing
         Delta5,
         RotorHazard,
         Chorus,
+        Velocidrone,
         Manual,
         Other,
     }
@@ -40,6 +43,8 @@ namespace Timing
 
         public Color Color { get; set; }
 
+        /// <summary>Optional simulator pilot identifier (e.g. Velocidrone uid) for pilot mapping.</summary>
+        public string SimulatorPilotId { get; set; }
 
         public ListeningFrequency(string band, int channel, int frequency, float sensitivityFactor, Color color)
             :this("", Guid.Empty, band, channel, frequency, sensitivityFactor, color)
@@ -144,6 +149,17 @@ namespace Timing
         string Name { get; }
     }
 
+    /// <summary>
+    /// Optional capability for devices that control race state but do not record laps.
+    /// Race-control systems are connected and displayed like timing systems, but are
+    /// excluded from the primary/split detection pipeline.
+    /// </summary>
+    public interface IRaceControlTimingSystem : ITimingSystem
+    {
+        event Action OnRaceStartRequest;
+        event Action OnRaceStopRequest;
+    }
+
     public struct StatusItem
     {
         public string Value { get; set; }
@@ -151,12 +167,14 @@ namespace Timing
     }
 
     [XmlInclude(typeof(DummySettings))]
+    [XmlInclude(typeof(ELRSSettings))]
     [XmlInclude(typeof(LapRFSettings))]
     [XmlInclude(typeof(LapRFSettingsUSB))]
     [XmlInclude(typeof(LapRFSettingsEthernet))]
-    [XmlInclude(typeof(VideoTimingSettings))]
     [XmlInclude(typeof(RotorHazardSettings))]
     [XmlInclude(typeof(ChorusSettings))]
+    [XmlInclude(typeof(Velocidrone.VelocidroneSettings))]
+    [XmlInclude(typeof(Timing.Aruco.ArucoTimingSettings))]
     public class TimingSystemSettings
     {
         [Category("System Settings")]
@@ -183,8 +201,9 @@ namespace Timing
 
                 return s;
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.TimingLog.LogException(typeof(TimingSystemSettings), ex);
                 return new TimingSystemSettings[] { };
             }
         }
@@ -211,6 +230,44 @@ namespace Timing
     {
         IEnumerable<RSSI> GetRSSI();
     }
+
+    /// <summary>
+    /// Implemented by timing systems that can accept a marshal correction made locally in
+    /// FPVTrackside and push it back out, so the remote system stays the source of truth.
+    /// The mirror image of MarshallEventDelegate/OnMarshallEvent, which receives corrections.
+    /// </summary>
+    public interface IRemoteMarshalUpdatable : ITimingSystem
+    {
+        void PushMarshalUpdate(MarshalData marshalData);
+
+        /// <summary>
+        /// Returns the RSSI waveform/calibration for a pilot run, or null if unavailable (e.g.
+        /// RotorHazard hasn't sent it - its ts_race_marshal broadcast doesn't include this yet).
+        /// </summary>
+        RSSIWaveform GetWaveform(Guid raceId, Guid pilotId);
+
+        /// <summary>
+        /// True if this specific connected instance is actually known to support marshalling -
+        /// distinct from "this class implements the interface", which just says the feature
+        /// exists in FPVTrackside's code. For a remote system (RotorHazard) this depends on
+        /// which version of its own connector plugin is deployed there, detected at connect
+        /// time - an old plugin predating marshalling should mean the UI doesn't offer it,
+        /// rather than silently failing/timing out when clicked. Local-only systems (Dummy)
+        /// have no such version concept and are always true.
+        /// </summary>
+        bool MarshalSupported { get; }
+    }
+
+    /// <summary>
+    /// Implemented by timing systems that want to know event-level metadata (e.g. the event's
+    /// display name), separate from the per-race StartMetaData sent on every race start -
+    /// set once, whenever the event is loaded or changed.
+    /// </summary>
+    public interface IEventAware : ITimingSystem
+    {
+        void SetEventMetaData(EventMetaData eventMetaData);
+    }
+
     public struct RSSI
     {
         public ITimingSystem TimingSystem { get; set; }
@@ -238,6 +295,20 @@ namespace Timing
         public TimeSpan Length { get; set; }
         public TimeSpan RaceTime { get; set; }
     }
-}
 
+    /// <summary>
+    /// Raw RSSI-over-time trace plus current enter/exit calibration for one pilot run, as used
+    /// by RotorHazard's own Marshal page to recompute lap crossings. Times are relative to race
+    /// start. Not yet populated by any ITimingSystem - RotorHazardTimingSystem will need the
+    /// ts_race_marshal broadcast extended (RH-side) to include history_values/history_times/
+    /// enter_at/exit_at before this can be filled in from a live race.
+    /// </summary>
+    public class RSSIWaveform
+    {
+        public TimeSpan[] Times { get; set; }
+        public int[] Values { get; set; }
+        public int EnterAt { get; set; }
+        public int ExitAt { get; set; }
+    }
+}
 

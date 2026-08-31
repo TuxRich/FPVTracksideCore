@@ -18,7 +18,7 @@ namespace UI.Nodes.Rounds
 {
     public class EventRaceNode : AspectNode
     {
-        public Race Race { get; private set; }
+        public Race Race { get; internal set; }
 
         public EventManager EventManager { get; private set; }
 
@@ -33,6 +33,8 @@ namespace UI.Nodes.Rounds
         public bool NeedsInit { get; set; }
 
         public const float StandardAspectRatio = 1.4f;
+
+        private TextNode startTimeNode;
 
         public EventRaceNode(EventManager eventManager, Race race)
         {
@@ -54,12 +56,15 @@ namespace UI.Nodes.Rounds
                 RoundSheetFormat sheetFormat = EventManager.RoundManager.SheetFormatManager.GetRoundSheetFormat(Race.Round);
                 int pilotCount = Race.PilotCount;
 
+                EventManager.RaceManager.ComputeHandicapOffsets(Race);
+
                 if (heading == null)
                 {
                     heading = new TextButtonNode(Race.RaceName, Theme.Current.Rounds.RaceTitle, Theme.Current.Hover.XNA, Theme.Current.Rounds.Text.XNA);
                     heading.OnClick += Heading_OnClick;
                     AddChild(heading);
                 }
+                heading.TextNode.Text = Race.RaceName;
                 float headingHeight = 0.15f;
 
                 // Make the heading shrink as the Aspect ratio becomes non-standard
@@ -85,7 +90,7 @@ namespace UI.Nodes.Rounds
                     bool channelChanged = false;
 
                     Pilot pilot = null;
-                    PilotChannel pilotChannel = Race.GetPilotChannel(channel);
+                    RacePilotChannel pilotChannel = Race.GetPilotChannel(channel);
                     if (pilotChannel != null)
                     {
                         pilot = pilotChannel.Pilot;
@@ -106,6 +111,16 @@ namespace UI.Nodes.Rounds
                     container.AddChild(pilotRaceInfoNode);
 
                     pilotRaceInfoNode.ResultText = EventManager.ResultManager.GetResultText(Race, pilot, channel);
+
+                    TimeSpan handicapOffset = pilotChannel?.HandicapOffset ?? TimeSpan.Zero;
+                    if (pilot != null && !Race.Ended && handicapOffset > TimeSpan.Zero)
+                    {
+                        string handicapText = "+" + handicapOffset.TotalSeconds.ToString("0.0") + "s";
+                        if (string.IsNullOrEmpty(pilotRaceInfoNode.ResultText))
+                            pilotRaceInfoNode.ResultText = handicapText;
+                        else
+                            pilotRaceInfoNode.ResultText += " " + handicapText;
+                    }
                 }
 
                 int size = Math.Max(grouped.Count(), 6);
@@ -118,14 +133,11 @@ namespace UI.Nodes.Rounds
                 }
                 heading.Scale(0.98f, 1);
 
-                if (Race.Started)
-                {
-                    TextNode time = new TextNode(Race.Start.ToShortTimeString(), Theme.Current.Rounds.Text.XNA);
-                    time.RelativeBounds = new RectangleF(0.55f, 0.30f, 0.4f, 0.4f);
-                    time.Alignment = RectangleAlignment.CenterRight;
-                    time.Alpha = 0.5f;
-                    heading.AddChild(time);
-                }
+                startTimeNode = new TextNode("", Theme.Current.Rounds.Text.XNA);
+                startTimeNode.RelativeBounds = new RectangleF(0.55f, 0.30f, 0.4f, 0.4f);
+                startTimeNode.Alignment = RectangleAlignment.CenterRight;
+                startTimeNode.Alpha = 0.5f;
+                heading.AddChild(startTimeNode);
             }
         }
 
@@ -183,6 +195,16 @@ namespace UI.Nodes.Rounds
                 if (EventManager.RaceManager.CurrentRace != Race)
                 {
                     mm.AddItem("Open Race", () => { EventManager.RaceManager.SetRace(Race); });
+                }
+
+                if (!EventManager.RaceManager.RaceRunning && EventManager.HasReplay(Race))
+                {
+                    mm.AddItem("Open Race Replay", () => { EventManager.JumpToReplay(Race); });
+                }
+
+                if (EventManager.HasReplay(Race))
+                {
+                    mm.AddItem("Open Race Replay (Second Window)", () => { EventManager.JumpToReplaySecondWindow(Race); });
                 }
 
                 if (Race != null)
@@ -245,18 +267,28 @@ namespace UI.Nodes.Rounds
 
                     copyMenu.AddItem("Copy Results", () =>
                     {
-                        string textResults = EventManager.ResultManager.GetResultsText(Race, ApplicationProfileSettings.Instance.Units).ToTSV();
+                        string textResults = EventManager.ResultManager.GetResultsText(Race, ApplicationProfileSettings.Instance.Units, ApplicationProfileSettings.Instance.ExportDecimalPlaces).ToTSV();
                         PlatformTools.Clipboard.SetText(textResults);
                     });
 
-                    mm.AddItemConfirm("Reset Race", () => { EventManager.RaceManager.ResetRace(Race); });
+                    mm.AddItemConfirm("Reset Race", () => { EventManager.RaceManager.ResetRace(Race); Refresh(); });
                 }
                 else
                 {
-                    var lines = PlatformTools.Clipboard.GetLines();
-                    IEnumerable<Tuple<Pilot, Channel>> pilotChannels = EventManager.GetPilotsFromLines(lines, false);
+                    string clipboardText = PlatformTools.Clipboard.GetText();
+                    bool hasPastePilots;
+                    if (PastedRace.TryParsePastedRaces(clipboardText, out List<PastedRace> jsonRaces))
+                    {
+                        hasPastePilots = jsonRaces.Any(r => r.Pilots != null && r.Pilots.Any());
+                    }
+                    else
+                    {
+                        var lines = PlatformTools.Clipboard.GetLines();
+                        IEnumerable<Tuple<Pilot, Channel>> pilotChannels = EventManager.GetPilotsFromLines(lines, false);
+                        hasPastePilots = pilotChannels.Any();
+                    }
 
-                    if (pilotChannels.Any())
+                    if (hasPastePilots)
                     {
                         mm.AddItem("Paste Pilots", () =>
                         {
@@ -272,22 +304,15 @@ namespace UI.Nodes.Rounds
                     mm.AddItemConfirm("Clear Race", () => { EventManager.RaceManager.ClearRace(Race); SyncSheetChange(); Refresh(); });
                 }
 
-                mm.AddItemConfirm("Delete Race", () => { EventManager.RaceManager.RemoveRace(Race, false); SyncSheetChange(); Refresh(); });
+                mm.AddItemConfirm("Delete Race", () => { EventManager.RaceManager.RemoveRace(Race, false); SyncSheetChange(); Refresh(true); });
 
                 mm.AddSubmenu("Set Race Bracket", SetBracket, Enum.GetValues(typeof(Brackets)).OfType<Brackets>().ToArray());
                 mm.AddItem("Open Race Folder", () =>
                 {
-                    // Use the same logic as the HTTP service to find the events folder
-                    string eventsPath = ApplicationProfileSettings.Instance.EventStorageLocation;
-                    if (string.IsNullOrEmpty(eventsPath))
-                    {
-                        eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", "events");
-                    }
-                    else if (!Path.IsPathRooted(eventsPath))
-                    {
-                        eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", eventsPath);
-                    }
-                    PlatformTools.OpenFileManager(Path.Combine(eventsPath, EventManager.EventId.ToString(), Race.ID.ToString()));
+                    string eventsPath = ApplicationProfileSettings.Instance.EventStorageDirectory.FullName;
+
+                    string racePath = Path.Combine(eventsPath, EventManager.EventId.ToString(), Race.ID.ToString());
+                    PlatformTools.OpenFileManager(racePath);
                 });
                 if (pilot != null)
                 {
@@ -487,12 +512,32 @@ namespace UI.Nodes.Rounds
 
         private void PasteFromClipboard(bool assign)
         {
-            var lines = PlatformTools.Clipboard.GetLines();
-            IEnumerable<Tuple<Pilot, Channel>> pcs = EventManager.GetPilotsFromLines(lines, assign);
+            string text = PlatformTools.Clipboard.GetText();
+            IEnumerable<Tuple<Pilot, Channel>> pilotChannels;
+            int externalRaceId = 0;
+
+            if (PastedRace.TryParsePastedRaces(text, out List<PastedRace> jsonRaces))
+            {
+                PastedRace first = jsonRaces.FirstOrDefault(r => r.Pilots != null && r.Pilots.Any());
+                if (first == null)
+                    return;
+                externalRaceId = first.ExternalRaceID;
+                pilotChannels = EventManager.GetPilotsFromLines(first.Pilots.Select(p => p.Name ?? ""), assign);
+            }
+            else
+            {
+                var lines = PlatformTools.Clipboard.GetLines();
+                pilotChannels = EventManager.GetPilotsFromLines(lines, assign);
+            }
 
             using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
             {
-                foreach (Tuple<Pilot, Channel> pc in pcs)
+                if (externalRaceId != 0 && Race.ExternalID == 0)
+                {
+                    Race.ExternalID = externalRaceId;
+                }
+
+                foreach (Tuple<Pilot, Channel> pc in pilotChannels)
                 {
                     Pilot p = pc.Item1;
                     Channel c = pc.Item2;
@@ -501,7 +546,7 @@ namespace UI.Nodes.Rounds
                     {
                         if (!Race.IsFrequencyFree(c))
                         {
-                            c = Race.GetFreeFrequencies(EventManager.Channels.Where(c => c.Band == c.Band)).FirstOrDefault();
+                            c = Race.GetFreeFrequencies(EventManager.Channels.Where(ch => ch.Band == c.Band)).FirstOrDefault();
                             if (c == null)
                                 continue;
                         }
@@ -512,7 +557,6 @@ namespace UI.Nodes.Rounds
             }
 
             SyncSheetChange();
-
             Refresh();
         }
 
@@ -541,6 +585,14 @@ namespace UI.Nodes.Rounds
         public void Refresh(bool full = false)
         {
             heading.TextNode.Text = Race.RaceName;
+            if (Race.Started)
+            {
+                startTimeNode.Text = Race.Start.ToShortTimeString();
+            }
+            else
+            {
+                startTimeNode.Text = " ";
+            }
 
             if (full)
             {

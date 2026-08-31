@@ -8,6 +8,7 @@ using RaceLib;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Timing;
 using Tools;
 
 namespace UI.Nodes
@@ -32,6 +33,9 @@ namespace UI.Nodes
         private object locker;
 
         public int LapLines { get; set; }
+
+        public Action<Lap> OnSeekToLap { get; set; }
+        public Action<Pilot, DateTime> OnAddLap { get; set; }
 
         private TableNode table;
 
@@ -173,7 +177,11 @@ namespace UI.Nodes
 
             if (playbackTime.HasValue)
             {
-                laps = laps.Where(lap => lap.Detection.Time < playbackTime.Value).ToArray();
+                // Use <= so a lap whose detection time is exactly the current playback
+                // position (e.g. one just added via "Add Lap Now" while paused) is included.
+                // Must match the comparison in SetPlaybackTime, otherwise this path (reached
+                // via ChannelNodeBase's OnLapDetected handler) runs after it and hides the lap.
+                laps = laps.Where(lap => lap.Detection.Time <= playbackTime.Value).ToArray();
             }
 
             RefreshData(laps);
@@ -199,11 +207,16 @@ namespace UI.Nodes
                         Lap lap = laps[lapIndex];
                         if (lap == null)
                             continue;
-                        
-                        lapNode.SetLap(lap);
 
-                        bool overalBest;
-                        if (EventManager.LapRecordManager.IsRecordLap(lap, out overalBest))
+                        lapNode.SetLap(lap);
+                        // Apply visibility here too, not only in Update(): while replay is
+                        // paused the per-frame Update tick doesn't reveal a freshly added lap,
+                        // so set it immediately to keep the data and the displayed rows in sync.
+                        lapNode.Visible = true;
+
+                        int pbLaps = EventManager.Event.PBLaps;
+
+                        if (EventManager.LapRecordManager.IsRecord(lap, pbLaps, out bool overalBest))
                         {
                             if (overalBest)
                             {
@@ -222,6 +235,7 @@ namespace UI.Nodes
                     else
                     {
                         lapNodes[i].Clear();
+                        lapNodes[i].Visible = false;
                     }
                 }
             }
@@ -283,6 +297,12 @@ namespace UI.Nodes
                 lap = lapNode.Lap;
             }
 
+            if (lap != null && OnSeekToLap != null)
+            {
+                mm.AddItem("Seek to Lap", () => { OnSeekToLap(lap); });
+                mm.AddBlank();
+            }
+
             if (EventManager.RaceManager.RaceRunning)
             {
                 mm.AddItem("Add Lap Now", () =>
@@ -297,16 +317,13 @@ namespace UI.Nodes
 #endif
             }  
 
-            if (EventManager.RaceManager.RaceFinished)
+            if (OnSeekToLap != null)
             {
-                // if we're in video playback do some adjustments..
-                if (playbackTime.HasValue)
+                mm.AddItem("Add Lap Now", () =>
                 {
-                    mm.AddItem("Add Lap Now", () =>
-                    {
-                        EventManager.RaceManager.AddManualLap(Pilot, playbackTime.Value);
-                    });
-                }
+                    if (playbackTime.HasValue)
+                        OnAddLap?.Invoke(Pilot, playbackTime.Value);
+                });
             }
             if (EventManager.RaceManager.RaceStarted)
             {
@@ -315,10 +332,23 @@ namespace UI.Nodes
                     GetLayer<PopupLayer>().Popup(new AddLapTimeNode(EventManager.RaceManager, Pilot));
                 });
 
-                mm.AddItem("Edit Laps", () =>
+                mm.AddBlank();
+
+               
+                if (!EventManager.RaceManager.RaceRunning && EventManager.RaceManager.TimingSystemManager.AllSystems.OfType<IRemoteMarshalUpdatable>().Any(ts => ts.MarshalSupported))
                 {
-                    EditLaps();
-                });
+                    mm.AddItem("Edit Laps / Marshal", () =>
+                    {
+                        OpenMarshal();
+                    });
+                }
+                else
+                {
+                    mm.AddItem("Edit Laps", () =>
+                    {
+                        EditLaps();
+                    });
+                }
 
                 if (Laps.Any())
                 {
@@ -337,6 +367,8 @@ namespace UI.Nodes
 
             if (lap != null)
             {
+                mm.AddBlank();
+
                 mm.AddItem("Disqualify Lap", () =>
                 {
                     EventManager.RaceManager.DisqualifyLap(lap);
@@ -391,6 +423,42 @@ namespace UI.Nodes
             };
         }
 
+        private void OpenMarshal()
+        {
+            Race currentRace = EventManager.RaceManager.CurrentRace;
+            if (currentRace == null)
+                return;
+
+            Channel channel = currentRace.GetChannel(Pilot);
+            if (channel == null)
+                return;
+
+            Lap[] editLaps = currentRace.GetLaps(l => l.Pilot == Pilot).ToArray();
+
+            RSSIWaveform waveform = EventManager.RaceManager.TimingSystemManager.AllSystems
+                .OfType<IRemoteMarshalUpdatable>()
+                .Where(ts => ts.MarshalSupported)
+                .Select(ts => ts.GetWaveform(currentRace.ID, Pilot.ID))
+                .FirstOrDefault(w => w != null);
+
+            MarshalEditorNode editor = new MarshalEditorNode(EventManager.RaceManager, currentRace, Pilot, editLaps, ChannelColor, waveform);
+
+            GetLayer<PopupLayer>().Popup(editor);
+            editor.OnOK += (v) =>
+            {
+                using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+                {
+                    db.Update(editLaps);
+                    currentRace.ReCalculateLaps(db, Pilot);
+                }
+
+                EventManager.LapRecordManager.ClearPilot(Pilot);
+                EventManager.LapRecordManager.UpdatePilot(Pilot);
+                EventManager.SpeedRecordManager.UpdatePilot(Pilot);
+                RefreshData();
+            };
+        }
+
         public void SetPlaybackTime(DateTime time)
         {
             playbackTime = time;
@@ -404,15 +472,20 @@ namespace UI.Nodes
                 if (!r.HasPilot(Pilot))
                     return;
 
+                // Grow/shrink the lap-cell table to fit the pilot's current lap count. Without
+                // this, a lap added during replay has no cell to display in (the array-based
+                // RefreshData never resizes the table), so it only shows once an UpdateLapCount
+                // happens on unpause.
+                if (lapsPerRow != GetLapsPerRowCount() || LapLines != table.Rows)
+                    UpdateLapCount();
+
                 Lap[] laps = r.GetValidLaps(Pilot, true).OrderBy(l => l.End).Where(lap => lap.Detection.Time <= playbackTime.Value).ToArray();
-             
-                if (laps.Any())
+
+                int visibleCount = lapNodes.Count(ln => ln != null && ln.Visible);
+                if (laps.Length != visibleCount ||
+                    (laps.Any() && laps.FirstOrDefault() != lapNodes.FirstOrDefault()?.Lap))
                 {
-                    if (laps.Length != lapNodes.Where(ln => ln != null).Where(ln => ln.Visible).Count() ||
-                                        laps.FirstOrDefault() != lapNodes.FirstOrDefault()?.Lap)
-                    {
-                        RefreshData(laps);
-                    }
+                    RefreshData(laps);
                 }
             }
         }

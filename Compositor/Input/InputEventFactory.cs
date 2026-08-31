@@ -157,8 +157,7 @@ namespace Composition.Input
                 }
                 catch (Exception ex)
                 {
-                    Tools.Logger.CrashLogger.Log(ex);
-                    throw;
+                    Tools.Logger.CrashLogger?.Log(ex);
                 }
             }
         }
@@ -267,7 +266,7 @@ namespace Composition.Input
                 }
                 catch (Exception e)
                 {
-                    Logger.Input.LogException(this, e);
+                    Logger.Input?.LogException(this, e);
                 }
             }
         }
@@ -334,13 +333,13 @@ namespace Composition.Input
                     MouseState newState = Mouse.GetState(Window);
                     Point cursorPosition = new Point((int)(newState.X * ResolutionScale), (int)(newState.Y * ResolutionScale));
 
-                    if (cursorPosition != OldMouseState.Position)
-                    {
-                        LastMouseUpdateTime = DateTime.Now;
-                    }
-
                     if (PlatformTools.Focused)
                     {
+                        if (cursorPosition != OldMouseState.Position)
+                        {
+                            LastMouseUpdateTime = DateTime.Now;
+                        }
+
                         if (newState.LeftButton != OldMouseState.LeftButton)
                         {
                             OnMouseInput(newState.LeftButton, MouseButtons.Left, cursorPosition);
@@ -369,7 +368,7 @@ namespace Composition.Input
                 }
                 catch (Exception e)
                 {
-                    Logger.Input.LogException(this, e);
+                    Logger.Input?.LogException(this, e);
                 }
             }
             OldMouseState = Mouse.GetState();
@@ -405,7 +404,7 @@ namespace Composition.Input
                 }
                 catch (Exception e)
                 {
-                    Logger.Input.LogException(this, e);
+                    Logger.Input?.LogException(this, e);
                 }
             }
         }
@@ -414,6 +413,9 @@ namespace Composition.Input
         {
             try
             {
+                if (!TouchPanel.GetCapabilities().IsConnected)
+                    return new TouchCollection(new TouchLocation[0]);
+
                 return TouchPanel.GetState();
             }
             catch

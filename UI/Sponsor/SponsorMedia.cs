@@ -6,14 +6,6 @@ using System.Threading.Tasks;
 
 namespace UI.Sponsor
 {
-    public enum AdType
-    {
-        None,
-        Video,
-        Image,
-        Patreon
-    }
-
     public class SponsorMedia
     {
         public string Filename { get; set; }
@@ -22,14 +14,14 @@ namespace UI.Sponsor
         public string Since { get; set; }
         public float DurationSeconds { get; set; }
 
-        public AdType AdType { get; set; }
+        public RaceLib.AdType AdType { get; set; }
         public int Weight { get; set; }
 
         public SponsorMedia()
         {
             Filename = "";
             Text = "";
-            DurationSeconds = 5;
+            DurationSeconds = 10;
             Weight = 1;
             Since = "";
             Name = "";

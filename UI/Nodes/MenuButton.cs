@@ -172,8 +172,58 @@ namespace UI.Nodes
                     webMenu.AddItem("Open MultiGP.com event page", () => { OpenMultiGPSite(); });
             }
 
-            MouseMenu openWindow = root.AddSubmenu("Open New Window");
-            root.AddBlank();
+            if (PlatformTools.HasFeature(PlatformFeature.SecondaryWindow))
+            {
+                MouseMenu openWindow = root.AddSubmenu("Open New Window");
+                root.AddBlank();
+
+                openWindow.AddItem("Log", () =>
+                {
+                    BaseGame baseGame = CompositorLayer.Game as BaseGame;
+                    baseGame.QuickLaunchWindow<LogNode>(eventManager, keyMapper);
+                });
+
+                if (hasEvent)
+                {
+                    BaseGame baseGame = CompositorLayer.Game as BaseGame;
+
+                    openWindow.AddItem("Event Status", () =>
+                    {
+                        baseGame.QuickLaunchWindow<EventStatusNodeTopBar>(eventManager, keyMapper);
+                    });
+
+                    openWindow.AddItem("Lap Count Summary", () =>
+                    {
+                        baseGame.QuickLaunchWindow<LapCountSummaryNode>(eventManager, keyMapper);
+                    });
+
+                    openWindow.AddItem("Lap Records", () =>
+                    {
+                        baseGame.QuickLaunchWindow<LapRecordsSummaryNode>(eventManager, keyMapper);
+                    });
+
+                    openWindow.AddItem("Pilot Channel List", () =>
+                    {
+                        baseGame.QuickLaunchWindow<PilotChanelList>(eventManager, keyMapper);
+                    });
+
+                    openWindow.AddItem("Points Summary", () =>
+                    {
+                        baseGame.QuickLaunchWindow<PointsSummaryNode>(eventManager, keyMapper);
+                    });
+
+                    openWindow.AddItem("Replay", () =>
+                    {
+                        baseGame.QuickLaunchWindow<ReplayNode>(eventManager, keyMapper);
+                    });
+
+                    openWindow.AddItem("Rounds", () =>
+                    {
+                        baseGame.QuickLaunchWindow<RoundsNode>(eventManager, keyMapper);
+                    });
+                }
+            }
+            
 
             root.AddItem("Application Settings", () =>
             {
@@ -249,13 +299,7 @@ namespace UI.Nodes
                     ShowVideoSettings();
                 });
             }
-
-            openWindow.AddItem("Log", () =>
-            {
-                BaseGame baseGame = CompositorLayer.Game as BaseGame;
-                baseGame.QuickLaunchWindow<LogNode>(eventManager, keyMapper);
-            });
-
+            
             if (hasEvent)
             {
                 root.AddBlank();
@@ -267,9 +311,10 @@ namespace UI.Nodes
 
                 MouseMenu export = root.AddSubmenu("Export");
 
-                FileTools.ExportMenu(export, "Export PBs", PlatformTools, "Save Top Consecutive Laps", eventManager.LapRecordManager.ExportPBs(), GetLayer<PopupLayer>());
-                FileTools.ExportMenu(export, "Export Raw Laps", PlatformTools, "Save Top Consecutive Laps", eventManager.RaceManager.GetRawLaps(), GetLayer<PopupLayer>());
-                FileTools.ExportMenu(export, "Export Race Results", PlatformTools, "Save Race Results", eventManager.RaceManager.GetRaceResultsText(ApplicationProfileSettings.Instance.Units), GetLayer<PopupLayer>());
+                int exportDecimalPlaces = ApplicationProfileSettings.Instance.ExportDecimalPlaces;
+                FileTools.ExportMenu(export, "Export PBs", PlatformTools, "Save Top Consecutive Laps", eventManager.LapRecordManager.ExportPBs(exportDecimalPlaces), GetLayer<PopupLayer>());
+                FileTools.ExportMenu(export, "Export Raw Laps", PlatformTools, "Save Top Consecutive Laps", eventManager.RaceManager.GetRawLaps(exportDecimalPlaces), GetLayer<PopupLayer>());
+                FileTools.ExportMenu(export, "Export Race Results", PlatformTools, "Save Race Results", eventManager.RaceManager.GetRaceResultsText(ApplicationProfileSettings.Instance.Units, exportDecimalPlaces), GetLayer<PopupLayer>());
 
                 MouseMenu delete = root.AddSubmenu("Delete from event");
 
@@ -292,6 +337,11 @@ namespace UI.Nodes
                     WorkSet workSet = new WorkSet();
                     eventManager.UnloadRaces(workSet, ll.WorkQueue);
                     eventManager.LoadRaces(workSet, ll.WorkQueue);
+
+                    ll.WorkQueue.Enqueue(workSet, "Recalculating Missing Results", () =>
+                    {
+                        eventManager.ResultManager.RecalculateMissingRaceResults();
+                    });
 
                     ll.WorkQueue.Enqueue(workSet, "Refreshing UI", () =>
                     {
@@ -345,7 +395,7 @@ namespace UI.Nodes
         {
             try
             {
-                DataTools.StartBrowser(@"https://docs.google.com/document/d/1ysdQD3JdPvdTsNZR1Q_jh6voXrC2lJlIUAcL1TOb670");
+                DataTools.StartBrowser(@"https://github.com/uewepuep/FPVTracksideCore/blob/master/documentation/FPVTrackside%20Manual.md");
             }
             catch
             {
@@ -392,23 +442,34 @@ namespace UI.Nodes
 
         public void ShowVideoSettings()
         {
-            videoManager?.StopDevices();
+            LoadingLayer ll = GetLayer<LoadingLayer>();
+            if (ll == null)
+                return;
 
-            VideoSourceEditor editor = VideoSourceEditor.GetVideoSourceEditor(eventManager, Profile);
-            GetLayer<PopupLayer>().Popup(editor);
-
-            editor.OnOK += (e) =>
+            WorkSet workSet = new WorkSet();
+            ll.WorkQueue.Enqueue(workSet, "Stopping Devices", () =>
             {
-                List<VideoConfig> sources = editor.Objects.ToList();
-                VideoManager.WriteDeviceConfig(Profile, sources);
+                videoManager?.StopDevices();
+            });
 
-                VideoSettingsExited?.Invoke(true);
-            };
-
-            editor.OnCancel += (e) =>
+            ll.WorkQueue.Enqueue(workSet, "Loading Settings", () =>
             {
-                VideoSettingsExited?.Invoke(false);
-            };
+                VideoSourceEditor editor = VideoSourceEditor.GetVideoSourceEditor(eventManager, Profile);
+                GetLayer<PopupLayer>().Popup(editor);
+
+                editor.OnOK += (e) =>
+                {
+                    List<VideoConfig> sources = editor.Objects.ToList();
+                    VideoManager.WriteDeviceConfig(Profile, sources);
+
+                    VideoSettingsExited?.Invoke(true);
+                };
+
+                editor.OnCancel += (e) =>
+                {
+                    VideoSettingsExited?.Invoke(false);
+                };
+            });
         }
 
         public void ShowPointsSettings()
@@ -583,22 +644,7 @@ namespace UI.Nodes
             // Special handling for "events" paths - use the same logic as HTTP service
             if (paths.Any() && paths[0] == "events")
             {
-                string eventsPath = ApplicationProfileSettings.Instance.EventStorageLocation;
-
-                // Trim off some legacy slashes.
-                if (eventsPath.EndsWith("/") || eventsPath.EndsWith("\\"))
-                {
-                    eventsPath = eventsPath.Substring(0, eventsPath.Length - 1);
-                }
-
-                if (string.IsNullOrEmpty(eventsPath))
-                {
-                    eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", "events");
-                }
-                else if (!Path.IsPathRooted(eventsPath))
-                {
-                    eventsPath = Path.Combine(IOTools.WorkingDirectory?.FullName ?? "", eventsPath);
-                }
+                string eventsPath = ApplicationProfileSettings.Instance.EventStorageDirectory.FullName;
 
                 // Append any additional path components after "events"
                 if (paths.Length > 1)

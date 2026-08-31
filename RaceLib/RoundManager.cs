@@ -16,9 +16,10 @@ namespace RaceLib
         public RaceManager RaceManager { get { return EventManager.RaceManager; } }
         public ResultManager ResultManager { get { return EventManager.ResultManager; } }
         public SheetFormatManager SheetFormatManager { get; set; }
+        public LuaFormatManager LuaFormatManager { get; set; }
 
-        public event Action OnRoundAdded;
-        public event Action OnRoundRemoved;
+        public event Action<Round> OnRoundAdded;
+        public event Action<Round> OnRoundRemoved;
         public event Action OnStageChanged;
 
         public Round[] Rounds
@@ -38,7 +39,7 @@ namespace RaceLib
         {
             EventManager = eventManager;
             SheetFormatManager = new SheetFormatManager(this);
-            RaceManager.OnRaceEnd += OnRaceResultsChange;
+            LuaFormatManager = new LuaFormatManager();
             RaceManager.OnRaceReset += OnRaceResultsChange;
             ResultManager.RaceResultsChanged += OnRaceResultsChange;
         }
@@ -65,10 +66,32 @@ namespace RaceLib
             }
 
             // Non-sheet stages: existing behaviour (generate next round when any result changes)
-            RoundFormat roundFormat = GetRoundFormat(race.Round.Stage);
-            RoundPlan roundPlan = new RoundPlan(EventManager, race.Round, race.Round.Stage);
+            Stage stage = race.Round.Stage;
 
-            GenerateNewRound(race.Round, roundFormat, roundPlan);
+            if (stage.GeneratesRounds)
+            {
+                RoundFormat roundFormat = GetRoundFormat(stage);
+                RoundPlan roundPlan = new RoundPlan(EventManager, race.Round, stage);
+
+                GenerateNewRound(race.Round, roundFormat, roundPlan);
+
+                LuaRoundFormat luaFormat = roundFormat as LuaRoundFormat;
+                if (luaFormat != null && luaFormat.HasStandings)
+                {
+                    Pilot[] stagePilots = RaceManager.Races
+                        .Where(r => r.Round?.Stage == stage)
+                        .SelectMany(r => r.Pilots)
+                        .Distinct()
+                        .ToArray();
+
+                    stage.Standings = luaFormat.GetStandings(stagePilots);
+
+                    using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+                    {
+                        db.Upsert(stage);
+                    }
+                }
+            }
         }
 
         public Round NextRound(Round round)
@@ -83,6 +106,24 @@ namespace RaceLib
             lock (Event.Rounds)
             {
                 return Event.Rounds.Count(r => r.Order >= start.Order && r.Order <= end.Order);
+            }
+        }
+
+        public Round GetRelativeRound(Round current, int offset)
+        {
+            if (offset == 0)
+                return current;
+
+            lock (Event.Rounds)
+            {
+                if (offset > 0)
+                {
+                    return Event.Rounds.Where(r => r.Order > current.Order).OrderBy(r => r.Order).Skip(offset - 1).FirstOrDefault();
+                }
+                else
+                {
+                    return Event.Rounds.Where(r => r.Order < current.Order).OrderByDescending(r => r.Order).Skip(Math.Abs(offset) - 1).FirstOrDefault();
+                }
             }
         }
 
@@ -135,7 +176,7 @@ namespace RaceLib
 
             using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
             {
-                foreach (var tup in pilotChannels)
+                foreach (Tuple<Pilot, Channel> tup in pilotChannels)
                 {
                     Channel c = tup.Item2;
                     Pilot p = tup.Item1;
@@ -143,13 +184,75 @@ namespace RaceLib
                     if (race == null || !race.IsFrequencyFree(c))
                     {
                         race = new Race(Event);
-                        race.AutoAssignNumbers = true;
+                        // Pasted races have explicit, correct race numbers. Do NOT flag
+                        // AutoAssignNumbers: that makes a later AddPilot (e.g. when the
+                        // race is opened / made current) renumber the race to max+1,
+                        // which is the "Race 9-1 jumps to 9-7" bug.
+                        race.AutoAssignNumbers = false;
                         race.RaceNumber = startNumber + 1 + races.Count;
                         race.Round = round;
                         races.Add(race);
                     }
 
                     race.SetPilot(db, c, p);
+                }
+            }
+
+            foreach (Race r in races)
+            {
+                RaceManager.AddRace(r);
+            }
+        }
+
+        public void SetRoundPilots(Round round, IEnumerable<PastedRace> pastedRaces)
+        {
+            int startNumber = RaceManager.GetRaceCount(round);
+            List<Race> races = new List<Race>();
+
+            using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+            {
+                foreach (PastedRace pasted in pastedRaces)
+                {
+                    if (pasted.Pilots == null || !pasted.Pilots.Any())
+                        continue;
+
+                    Race race = new Race(Event);
+                    // See the note on the other overload: pasted races keep their own
+                    // numbers, so AutoAssignNumbers must stay false or opening the race
+                    // later renumbers it to max+1.
+                    race.AutoAssignNumbers = false;
+                    race.RaceNumber = startNumber + 1 + races.Count;
+                    race.Round = round;
+                    race.ExternalID = pasted.ExternalRaceID;
+                    races.Add(race);
+
+                    int channelIndex = 0;
+                    foreach (PastedPilot pp in pasted.Pilots)
+                    {
+                        string name = (pp.Name ?? "").Trim();
+                        Pilot p = Event.Pilots.FirstOrDefault(pa => pa != null && pa.Name.ToLower() == name.ToLower());
+                        if (p != null)
+                        {
+                            if (pp.ExternalPilotID != 0)
+                                p.ExternalID = pp.ExternalPilotID;
+
+                            // An explicit pasted channel (e.g. "R1") wins — assign the
+                            // pilot to that exact channel from the event's set. Fall back
+                            // to the auto-cycled channel group when absent/unresolvable.
+                            Channel c = EventManager.Channels.GetByString(pp.Channel);
+                            if (c == null)
+                            {
+                                c = EventManager.GetChannel(p);
+                                Channel chosen = EventManager.GetChannelGroup(channelIndex)?.FirstOrDefault(ch => ch.Band.GetBandType() == c.Band.GetBandType());
+                                if (chosen != null)
+                                    c = chosen;
+                            }
+
+                            race.SetPilot(db, c, p);
+                        }
+                        channelIndex++;
+                        channelIndex = channelIndex % EventManager.Channels.Length;
+                    }
                 }
             }
 
@@ -187,12 +290,8 @@ namespace RaceLib
 
         public IEnumerable<Race> GenerateRound(RoundPlan roundPlan)
         {
-            Round newRound = GetCreateRound(RaceManager.GetMaxRoundNumber(roundPlan.CallingRound.EventType) + 1, roundPlan.CallingRound.EventType);
-
-            if (roundPlan.KeepStage)
-            {
-                newRound.Stage = roundPlan.Stage;
-            }
+            Stage roundStage = roundPlan.KeepStage ? roundPlan.Stage : null;
+            Round newRound = GetCreateRound(RaceManager.GetMaxRoundNumber(roundPlan.CallingRound.EventType) + 1, roundPlan.CallingRound.EventType, roundStage, roundPlan.CallingRound.Order);
 
             RoundFormat roundFormat = null;
 
@@ -215,11 +314,13 @@ namespace RaceLib
 
         public IEnumerable<Race> GenerateNewRound(Round callingRound, RoundFormat roundFormat, RoundPlan roundPlan)
         {
-            Round newRound = GetCreateRound(callingRound.RoundNumber + 1, callingRound.EventType, roundFormat.Stage);
+            Round existingNext = GetStageRounds(roundFormat.Stage).FirstOrDefault(r => r.Valid && r.Order > callingRound.Order);
+            int newRoundNumber = existingNext?.RoundNumber ?? (RaceManager.GetMaxRoundNumber(callingRound.EventType) + 1);
+            Round newRound = GetCreateRound(newRoundNumber, callingRound.EventType, roundFormat.Stage, callingRound.Order);
             return GenerateFillRound(newRound, roundFormat, roundPlan);
         }
 
-        public void GenerateStageRound(Round callingRound, StageTypes stageType, IEnumerable<Pilot> orderedPilots)
+        public void GenerateStageRound(Round callingRound, StageTypes stageType, IEnumerable<Pilot> orderedPilots, Action<Stage> onSetup = null)
         {
             bool needsStage = false;
 
@@ -227,6 +328,9 @@ namespace RaceLib
                 needsStage = true;
 
             if (callingRound.Stage != null && callingRound.Stage.StageType != stageType)
+                needsStage = true;
+
+            if (onSetup != null)
                 needsStage = true;
 
             Stage stage = null;
@@ -238,9 +342,18 @@ namespace RaceLib
                     stage = new Stage();
                     stage.ID = Guid.NewGuid();
                     stage.StageType = stageType;
-                    stage.AutoName(this);
 
-                    db.Insert(stage);
+                    if (onSetup == null)
+                    {
+                        stage.AutoName(this);
+                        db.Insert(stage);
+                    }
+                    else
+                    {
+                        db.Insert(stage);
+                        onSetup(stage);
+                        db.Update(stage);
+                    }
                 }
             }
             else
@@ -274,7 +387,7 @@ namespace RaceLib
 
         public IEnumerable<Race> GenerateSeededX(Round callingRound, IEnumerable<Pilot> pilots)
         {
-            Round newRound = GetCreateRound(RaceManager.GetMaxRoundNumber(callingRound.EventType) + 1, callingRound.EventType);
+            Round newRound = GetCreateRound(RaceManager.GetMaxRoundNumber(callingRound.EventType) + 1, callingRound.EventType, null, callingRound.Order);
 
             RoundFormat roundFormat = new SeededFormat(EventManager);
 
@@ -287,7 +400,7 @@ namespace RaceLib
 
         public IEnumerable<Race> GenerateTopX(Round callingRound, IEnumerable<Pilot> pilots)
         {
-            Round newRound = GetCreateRound(RaceManager.GetMaxRoundNumber(callingRound.EventType) + 1, callingRound.EventType);
+            Round newRound = GetCreateRound(RaceManager.GetMaxRoundNumber(callingRound.EventType) + 1, callingRound.EventType, null, callingRound.Order);
 
             RoundFormat roundFormat = new TopFormat(EventManager);
 
@@ -315,7 +428,7 @@ namespace RaceLib
                 }
 
                 RaceManager.UpdateRaceRoundNumbers();
-                OnRoundAdded?.Invoke();
+                OnRoundAdded?.Invoke(newRound);
 
                 return aRound;
             }
@@ -361,7 +474,7 @@ namespace RaceLib
             }
         }
 
-        public Round GetCreateRound(int roundNumber, EventTypes eventType, Stage stage = null)
+        public Round GetCreateRound(int roundNumber, EventTypes eventType, Stage stage = null, int insertAfterOrder = -1)
         {
             if (roundNumber == 0)
                 roundNumber = 1;
@@ -383,7 +496,13 @@ namespace RaceLib
                             round.GameTypeName = gameType.Name;
                     }
 
-                    if (Event.Rounds.Any())
+                    if (insertAfterOrder >= 0)
+                    {
+                        foreach (Round r in Event.Rounds.Where(r => r.Order > insertAfterOrder))
+                            r.Order += 100;
+                        round.Order = insertAfterOrder + 100;
+                    }
+                    else if (Event.Rounds.Any())
                     {
                         round.Order = Event.Rounds.Max(r => r.Order) + 100;
                     }
@@ -421,13 +540,14 @@ namespace RaceLib
             return !RaceManager.GetRaces(round).Any();
         }
 
-        public Round CreateEmptyRound(EventTypes eventType, Stage stage = null)
+        public Round CreateEmptyRound(EventTypes eventType, Stage stage = null, Round callingRound = null)
         {
             int maxRoundNumber = RaceManager.GetMaxRoundNumber(eventType);
+            int insertAfterOrder = callingRound != null ? callingRound.Order : -1;
 
-            Round newRound = GetCreateRound(maxRoundNumber + 1, eventType);
-            newRound.Stage = stage;
-            OnRoundAdded?.Invoke();
+            Round newRound = GetCreateRound(maxRoundNumber + 1, eventType, stage, insertAfterOrder);
+            RaceManager.UpdateRaceRoundNumbers();
+            OnRoundAdded?.Invoke(newRound);
 
             return newRound;
         }
@@ -460,7 +580,7 @@ namespace RaceLib
 
             CheckThereIsOneRound();
 
-            OnRoundRemoved?.Invoke();
+            OnRoundRemoved?.Invoke(round);
         }
 
         public IEnumerable<Pilot> GetOutputPilots(Round round)
@@ -480,6 +600,15 @@ namespace RaceLib
 
         public RoundFormat GetRoundFormat(Stage stage)
         {
+            if (stage.HasScriptFormat)
+            {
+                LuaFormatManager.ScriptFile scriptFile = LuaFormatManager?.GetScriptFile(stage.ScriptFormatFilename);
+                if (scriptFile != null)
+                    return new LuaRoundFormat(EventManager, stage, scriptFile, LuaFormatManager.ScriptTimeout);
+
+                Logger.AllLog.Log(this, $"Script '{stage.ScriptFormatFilename}' not found for stage '{stage.Name}'.");
+            }
+
             switch (stage.StageType)
             {
                 case StageTypes.DoubleElimination:
@@ -488,10 +617,10 @@ namespace RaceLib
                 case StageTypes.Final:
                     return new FinalFormat(EventManager, stage);
 
-                case StageTypes.StreetLeague: 
+                case StageTypes.StreetLeague:
                     return new StreetLeague(EventManager, stage);
 
-                case StageTypes.ChaseTheAce: 
+                case StageTypes.ChaseTheAce:
                     return new ChaseTheAce(EventManager, stage);
 
                 case StageTypes.Default:
@@ -515,18 +644,17 @@ namespace RaceLib
 
             RaceManager.UpdateRaceRoundNumbers();
 
-            OnRoundAdded?.Invoke();
+            OnRoundAdded?.Invoke(round);
             return cloned;
         }
 
-        public IEnumerable<Race> CloneRound(Round round)
+        public IEnumerable<Race> CloneRound(Round round, Stage stage)
         {
             IEnumerable<Race> races = RaceManager.Races.Where(r => r.Round == round).OrderBy(r => r.RaceNumber);
 
             int maxRound = RaceManager.GetMaxRoundNumber(round.EventType);
 
-            Round newRound = GetCreateRound(maxRound + 1, round.EventType);
-            newRound.Stage = round.Stage;
+            Round newRound = GetCreateRound(maxRound + 1, round.EventType, stage, round.Order);
 
             List<Race> newRaces = new List<Race>();
             foreach (Race race in races)
@@ -542,19 +670,13 @@ namespace RaceLib
             }
 
             RaceManager.UpdateRaceRoundNumbers();
-            OnRoundAdded?.Invoke();
+            OnRoundAdded?.Invoke(newRound);
             return newRaces;
         }
 
         public void GenerateFinal(Round callingRound)
         {
-            Round newRound = GetCreateRound(callingRound.RoundNumber + 1, EventManager.Event.EventType);
-
-            RoundFormat roundFormat = new FinalFormat(EventManager);
-            RoundPlan plan = new RoundPlan(EventManager, callingRound, null);
-            plan.NumberOfRaces = (int)Math.Ceiling(plan.Pilots.Count() / (float)EventManager.Channels.GetChannelGroups().Count());
-
-            GenerateFillRound(newRound, roundFormat, plan);
+            GenerateStageRound(callingRound, StageTypes.Final, GetOutputPilots(callingRound));
         }
 
         public void DeleteRounds()
@@ -669,13 +791,15 @@ namespace RaceLib
 
         public void DeleteStage(IDatabase db, Stage stage)
         {
+            if (stage == null)
+                return;
+
             Round[] rounds = GetStageRounds(stage).ToArray();
             foreach (Round r in rounds)
             {
                 r.Stage = null;
                 db.Update(r);
             }
-
             stage.Valid = false;
             db.Update(stage);
             OnStageChanged?.Invoke();
@@ -794,81 +918,63 @@ namespace RaceLib
             yield return lastRound;
         }
 
-        public bool ToggleSumPoints(Round round)
+        public void AddSumPoints(Round round)
         {
             using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
             {
                 if (round.Stage == null)
-                {
                     round.Stage = CreateStage(db, round);
-                    round.Stage.PointSummary = new PointSummary(ResultManager.PointsSettings);
-                    db.Update(round.Stage);
-                    return true;
-                }
-                else
-                {
-                    DeleteStage(db, round.Stage);
-                    return false;
-                }
+
+                round.Stage.PointSummary = new PointSummary(ResultManager.PointsSettings);
+                round.Stage.TimeSummary = null;
+                round.Stage.LapCountAfterRound = false;
+                round.Stage.PackCountAfterRound = false;
+                db.Update(round.Stage);
             }
         }
 
-        public bool ToggleTimePoints(Round round, TimeSummary.TimeSummaryTypes type)
+        public void AddTimeSummary(Round round, TimeSummary.TimeSummaryTypes type)
         {
             using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
             {
                 if (round.Stage == null)
-                {
                     round.Stage = CreateStage(db, round);
-                    round.Stage.TimeSummary = new TimeSummary() { TimeSummaryType = type };
-                    db.Update(round.Stage);
-                    return true;
-                }
-                else
-                {
-                    DeleteStage(db, round.Stage);
-                    return false;
-                }
+
+                round.Stage.PointSummary = null;
+                round.Stage.TimeSummary = new TimeSummary() { TimeSummaryType = type };
+                round.Stage.LapCountAfterRound = false;
+                round.Stage.PackCountAfterRound = false;
+                db.Update(round.Stage);
             }
         }
 
-        public bool ToggleLapCount(Round round)
+        public void AddLapCount(Round round)
         {
             using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
             {
                 if (round.Stage == null)
-                {
                     round.Stage = CreateStage(db, round);
-                    round.Stage.LapCountAfterRound = !round.Stage.LapCountAfterRound;
 
-                    db.Update(round.Stage);
-                    return true;
-                }
-                else
-                {
-                    DeleteStage(db, round.Stage);
-                    return false;
-                }
+                round.Stage.PointSummary = null;
+                round.Stage.TimeSummary = null;
+                round.Stage.LapCountAfterRound = true;
+                round.Stage.PackCountAfterRound = false;
+                db.Update(round.Stage);
             }
         }
 
-        public bool TogglePackCount(Round round)
+        public void AddPackCount(Round round)
         {
             using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
             {
                 if (round.Stage == null)
-                {
                     round.Stage = CreateStage(db, round);
-                    round.Stage.PackCountAfterRound = !round.Stage.PackCountAfterRound;
 
-                    db.Update(round.Stage);
-                    return true;
-                }
-                else
-                {
-                    DeleteStage(db, round.Stage);
-                    return false;
-                }
+                round.Stage.PointSummary = null;
+                round.Stage.TimeSummary = null;
+                round.Stage.LapCountAfterRound = false;
+                round.Stage.PackCountAfterRound = true;
+                db.Update(round.Stage);
             }
         }
 

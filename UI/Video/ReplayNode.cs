@@ -32,6 +32,7 @@ namespace UI.Video
 
         private IPlaybackFrameSource primary;
         private Race race;
+        private DateTime? seekOnStart;
 
         private DateTime minStart;
         private DateTime maxEnd;
@@ -48,6 +49,9 @@ namespace UI.Video
         {
             get
             {
+                Race race = this.race;
+                SeekNode SeekNode = this.SeekNode;
+
                 if (race == null || SeekNode == null)
                     return DateTime.Now;
 
@@ -59,6 +63,9 @@ namespace UI.Video
         {
             get
             {
+                Race race = this.race;
+                SeekNode SeekNode = this.SeekNode;
+
                 if (race == null || SeekNode == null) 
                     return TimeSpan.Zero;
 
@@ -70,6 +77,9 @@ namespace UI.Video
         {
             get
             {
+                Race race = this.race;
+                SeekNode SeekNode = this.SeekNode;
+
                 if (race == null || SeekNode == null)
                     return TimeSpan.Zero;
 
@@ -121,7 +131,12 @@ namespace UI.Video
             if (primary != null && race != null)
             {
                 SeekNode.SetRace(race, minStart, maxEnd);
-                ChannelsGridNode.SetPlaybackTime(race.Start);
+                // Use the frame source's full-precision time rather than SeekNode.CurrentTime,
+                // which round-trips through a float progress factor. A lap added at the current
+                // playback position has Detection.Time == primary.CurrentTime; the lossy seek time
+                // could round just below it and cause SetPlaybackTime's "Detection.Time <= time"
+                // filter to drop the freshly added lap from the replay list.
+                ChannelsGridNode.SetPlaybackTime(primary.CurrentTime);
             }
         }
 
@@ -231,7 +246,7 @@ namespace UI.Video
             race = null;
         }
 
-        public bool ReplayRace(Race race)
+        public bool ReplayRace(Race race, Lap lap = null)
         {
             try
             {
@@ -239,6 +254,14 @@ namespace UI.Video
                 SeekNode.ClearFlags();
 
                 this.race = race;
+                if (lap != null)
+                {
+                    seekOnStart = lap.Start;
+                }
+                else
+                {
+                    seekOnStart = null;
+                }
 
                 PlaybackVideoManager = VideoManagerFactory.CreateVideoManager();
                 PlaybackVideoManager.OnStart += PlaybackVideoManager_OnStart;
@@ -287,6 +310,8 @@ namespace UI.Video
                     ChannelNodeBase[] channelNodes = ChannelsGridNode.AddPilots(race.PilotChannelsSafe);
                     foreach (ChannelNodeBase cbn in channelNodes)
                     {
+                        cbn.LapsNode.OnSeekToLap = (l) => { Seek(l.Start); };
+                        cbn.LapsNode.OnAddLap = (pilot, time) => { EventManager.RaceManager.AddManualLapWithRace(race, pilot, time, 0); };
                         cbn.OnCloseClick += () => { Hide(cbn); };
                         cbn.OnCrashedOutClick += () => { Hide(cbn); };
 
@@ -322,6 +347,13 @@ namespace UI.Video
                 primary = (IPlaybackFrameSource)obj;
             }
             PlaybackVideoManager.OnStart -= PlaybackVideoManager_OnStart;
+
+            if (seekOnStart != null)
+            {
+                Seek(seekOnStart.Value);
+                Stop();
+                seekOnStart = null;
+            }
         }
 
         private void Hide(ChannelNodeBase cbn)
@@ -424,7 +456,7 @@ namespace UI.Video
                 {
                     if (CompositorLayer?.InputEventFactory.AreControlKeysDown() == true)
                     {
-                        PlatformTools.Clipboard.SetText(EventManager.GetResultsText(ApplicationProfileSettings.Instance.Units).ToTSV());
+                        PlatformTools.Clipboard.SetText(EventManager.GetResultsText(ApplicationProfileSettings.Instance.Units, ApplicationProfileSettings.Instance.ExportDecimalPlaces).ToTSV());
                     }
                 }
             }

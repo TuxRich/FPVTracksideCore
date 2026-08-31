@@ -31,16 +31,22 @@ namespace RaceLib
         public event Race.OnRaceEvent OnRaceCreated;
         public event Race.OnRaceEvent OnRaceStart;
         public event Race.OnRaceEvent OnRacePreStart;
+        public event Action<Race, DateTime> OnRaceStartScheduled;
         public event Race.OnRaceEvent OnRaceChanged;
         public event Race.OnRaceEvent OnRaceResumed;
         public event Race.OnRaceEvent OnRacePilotsSet;
 
         public event Race.OnRaceEvent OnRaceReset;
+        // Staggered start (TimeTrial + ApplicationProfileSettings.TimeTrialStaggeredStart):
+        // fires once per pilot at the instant they get the go signal inside StartStaggered.
+        // Args: race, pilot-channel, orderIndex (0-based), totalPilots, delay between pilots.
+        public event Action<Race, PilotChannel, int, int, TimeSpan> OnPilotStartStaggered;
         public event Race.OnRaceEvent OnRaceEnd;
         public event Race.OnRaceEvent OnRaceClear;
         public event Action<Race, bool> OnRaceCancelled;
         public event Action<Race, TimeSpan> OnRaceTimeRemaining;
         public event Action<Race> OnRaceTimesUp;
+        public event Action<Race, Pilot> OnPilotHandicapStart;
 
         public event Race.OnRaceEvent OnRaceRemoved;
 
@@ -132,7 +138,8 @@ namespace RaceLib
 
                 if (currentRace == null)
                     return EventManager.Channels;
-                return EventManager.Channels.Except(currentRace.Channels);
+
+                return currentRace.GetFreeFrequencies(EventManager.Channels);
             }
         }
 
@@ -242,7 +249,7 @@ namespace RaceLib
 
         private List<Race> races;
 
-        public bool PreRaceStartDelay { get; private set; }
+        public bool PreRaceStartDelay { get; protected set; }
         public bool StaggeredStart { get; private set; }
 
         public bool TimesUp
@@ -425,8 +432,7 @@ namespace RaceLib
                 return false;
             }
 
-            // Only practise/freestyle can add pilots randomly.
-            if (EventType != EventTypes.Practice || EventType != EventTypes.Freestyle)
+            if (!EventType.CanAddPilotsDuringRace())
             {
                 if (currentRace.Running)
                 {
@@ -625,7 +631,7 @@ namespace RaceLib
             return true;
         }
 
-        public bool StartRace()
+        public virtual bool StartRace()
         {
             return StartRaceInLessThan(EventManager.Event.MinStartDelay, EventManager.Event.MaxStartDelay);
         }
@@ -695,10 +701,14 @@ namespace RaceLib
 
             OnRaceStart?.Invoke(currentRace);
 
+            int totalPilots = pilotChannels.Length;
+            int orderIndex = 0;
             foreach (PilotChannel pc in pilotChannels)
             {
                 Thread.Sleep(delay);
+                OnPilotStartStaggered?.Invoke(currentRace, pc, orderIndex, totalPilots, delay);
                 onStart(pc);
+                orderIndex++;
             }
 
             StaggeredStart = false;
@@ -747,6 +757,8 @@ namespace RaceLib
                 }
             }
 
+            OnRaceStartScheduled?.Invoke(currentRace, startTime);
+
             while (PreRaceStartDelay && DateTime.Now < startTime)
             {
                 Thread.Sleep(1);
@@ -756,34 +768,65 @@ namespace RaceLib
             if (PreRaceStartDelay)
             {
                 Logger.RaceLog.LogCall(this, CurrentRace, "Requested wait", randomTime, "Actual wait", DateTime.Now - now);
-
-                currentRace.PrimaryTimingSystemLocation = EventManager.Event.PrimaryTimingSystemLocation;
-                currentRace.TargetLaps = EventManager.Event.Laps;
-                currentRace.Start = startTime;
-                currentRace.End = default(DateTime);
-                currentRace.TotalPausedTime = TimeSpan.Zero;
-                currentRace.AutoAssignNumbers = false;
-
-                lock (races)
-                {
-                    if (!races.Contains(currentRace))
-                    {
-                        races.Add(currentRace);
-                        OnRaceCreated(currentRace);
-                    }
-                }
-
-                using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
-                {
-                    db.Upsert(currentRace);
-                    CheckEventStart(db);
-                }
-
-                OnRaceStart?.Invoke(currentRace);
-
+                CommitRaceStart(currentRace, startTime);
                 PreRaceStartDelay = false;
             }
             return true;
+        }
+
+        protected void CommitRaceStart(Race currentRace, DateTime startTime)
+        {
+            currentRace.PrimaryTimingSystemLocation = EventManager.Event.PrimaryTimingSystemLocation;
+            currentRace.TargetLaps = EventManager.Event.Laps;
+            currentRace.Start = startTime;
+            currentRace.End = default(DateTime);
+            currentRace.TotalPausedTime = TimeSpan.Zero;
+            currentRace.AutoAssignNumbers = false;
+
+            lock (races)
+            {
+                if (!races.Contains(currentRace))
+                {
+                    races.Add(currentRace);
+                    OnRaceCreated?.Invoke(currentRace);
+                }
+            }
+
+            using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+            {
+                db.Upsert(currentRace);
+                CheckEventStart(db);
+            }
+
+            OnRaceStart?.Invoke(currentRace);
+
+            ScheduleHandicapStartCues(currentRace, startTime);
+        }
+
+        private void ScheduleHandicapStartCues(Race race, DateTime raceStart)
+        {
+            if (race == null || race.Round == null || !race.Round.Handicapped)
+                return;
+
+            foreach (RacePilotChannel pc in race.PilotChannelsSafe)
+            {
+                if (pc.Pilot == null)
+                    continue;
+
+                DateTime fireAt = raceStart + pc.HandicapOffset;
+                TimeSpan delay = fireAt - DateTime.Now;
+                if (delay < TimeSpan.Zero)
+                    delay = TimeSpan.Zero;
+
+                Pilot capturedPilot = pc.Pilot;
+                Race capturedRace = race;
+                Task.Delay(delay).ContinueWith(t =>
+                {
+                    if (CurrentRace != capturedRace || !capturedRace.Running)
+                        return;
+                    OnPilotHandicapStart?.Invoke(capturedRace, capturedPilot);
+                }, TaskScheduler.Default);
+            }
         }
 
         private void CheckEventStart(IDatabase db)
@@ -812,7 +855,7 @@ namespace RaceLib
             return false;
         }
 
-        private bool SetListeningFrequencies(Race race)
+        protected bool SetListeningFrequencies(Race race)
         {
             if (race == null)
                 return false;
@@ -831,6 +874,7 @@ namespace RaceLib
                     if (pilotChannel != null)
                     {
                         listeningFrequency = new ListeningFrequency(pilotChannel.PilotName, pilotChannel.Pilot.ID, eventChannel.Band.ToString(), eventChannel.Number, eventChannel.Frequency, pilotChannel.Pilot.TimingSensitivityPercent / 100.0f, color);
+                        listeningFrequency.SimulatorPilotId = pilotChannel.Pilot.VelocidroneUID;
                     }
                     else
                     {
@@ -844,13 +888,18 @@ namespace RaceLib
             }
             else
             {
-                if (race.Type == EventTypes.CasualPractice)
+                if (race.Type.ListenAllChannels())
                 {
                     frequencies = EventManager.Channels.Select(c => new ListeningFrequency(c.Band.ToString(), c.Number, c.Frequency, 1, EventManager.GetChannelColor(c))).ToList();
                 }
                 else
                 {
-                    frequencies = race.PilotChannelsSafe.Select(pc => new ListeningFrequency(pc.PilotName, pc.Pilot.ID, pc.Channel.Band.ToString(), pc.Channel.Number, pc.Channel.Frequency, pc.Pilot.TimingSensitivityPercent / 100.0f, EventManager.GetRaceChannelColor(race, pc.Channel))).ToList();
+                    frequencies = race.PilotChannelsSafe.Select(pc =>
+                    {
+                        var lf = new ListeningFrequency(pc.PilotName, pc.Pilot.ID, pc.Channel.Band.ToString(), pc.Channel.Number, pc.Channel.Frequency, pc.Pilot.TimingSensitivityPercent / 100.0f, EventManager.GetRaceChannelColor(race, pc.Channel));
+                        lf.SimulatorPilotId = pc.Pilot.VelocidroneUID;
+                        return lf;
+                    }).ToList();
                 }
 
                 Logger.RaceLog.LogCall(this, race, "Frequencies dynamically assigned to receivers");
@@ -863,7 +912,7 @@ namespace RaceLib
             return true;
         }
 
-        private bool StartDetection(ref DateTime start)
+        protected bool StartDetection(ref DateTime start)
         {
             Guid raceId = Guid.Empty;
             if (CurrentRace != null)
@@ -884,7 +933,7 @@ namespace RaceLib
             return true;
         }
 
-        public bool EndRace()
+        public virtual bool EndRace()
         {
             Logger.RaceLog.LogCall(this, CurrentRace);
 
@@ -976,6 +1025,7 @@ namespace RaceLib
             {
                 db.Upsert(race.PilotChannelsSafe);
                 db.Upsert(race);
+                db.Upsert(EventManager.Event);
             }
 
             OnRaceCreated?.Invoke(race);
@@ -1167,6 +1217,9 @@ namespace RaceLib
 
                 //Update the first detection so it matches the event so you can change it on an existing race and rerun it.
                 currentRace.PrimaryTimingSystemLocation = EventManager.Event.PrimaryTimingSystemLocation;
+
+                ComputeHandicapOffsets(currentRace);
+
                 OnRaceChanged?.Invoke(currentRace);
 
                 if (currentRace != null)
@@ -1189,6 +1242,42 @@ namespace RaceLib
                 return true;
             }
             return false;
+        }
+
+        public void ComputeHandicapOffsets(Race race)
+        {
+            if (race == null || race.Round == null) return;
+            if (!race.Round.Handicapped) return;
+            if (race.Ended || race.Started) return;
+
+            if (!race.Type.HasLaps())
+            {
+                Logger.RaceLog.LogCall(this, race, "Handicap requested but race type has no laps; skipping");
+                return;
+            }
+
+            int targetLaps = race.TargetLaps > 0 ? race.TargetLaps : EventManager.Event.Laps;
+            if (targetLaps <= 0)
+            {
+                Logger.RaceLog.LogCall(this, race, "Handicap requested but no lap target (TimesUp race); skipping");
+                return;
+            }
+
+            int pbLaps = EventManager.Event.PBLaps;
+            if (pbLaps <= 0) return;
+
+            Dictionary<Pilot, TimeSpan> offsets = HandicapCalculator.Calculate(
+                race.Pilots,
+                targetLaps,
+                pbLaps,
+                EventManager.LapRecordManager);
+
+            foreach (RacePilotChannel pc in race.PilotChannelsSafe)
+            {
+                if (pc.Pilot == null) continue;
+                TimeSpan offset;
+                pc.HandicapOffset = offsets.TryGetValue(pc.Pilot, out offset) ? offset : TimeSpan.Zero;
+            }
         }
 
         public void SetupCasualPractice(Race race)
@@ -1389,17 +1478,22 @@ namespace RaceLib
             if (eve == null)
                 return;
 
-            // If its added manually by race director every lap is valid.
-            if (detection.TimingSystemType != TimingSystemType.Manual)
+            // If its added manually by race director every lap is valid. All training laps are valid.
+            // (Validate only auto detections in non-training events. A previous '||' here invalidated
+            //  manual director-added laps in Race events - e.g. laps added during replay of a
+            //  finished race, where TimesUp is true - contradicting the comment above.)
+            if (detection.TimingSystemType != TimingSystemType.Manual && EventType != EventTypes.Training)
             {
                 // We start the timer before the race start, so just ignore any times in there...
-                if (currentRace.Start > detection.Time)
+                // For handicapped pilots, gate against their personal staggered start instead of Race.Start.
+                DateTime pilotStart = currentRace.GetHandicappedStart(detection.Pilot);
+                if (pilotStart > detection.Time)
                 {
                     detection.Valid = false;
                 }
 
                 //Inside race start ignore window. Which is disabled in the UI for holeshot..
-                if (currentRace.Start + eve.RaceStartIgnoreDetections > detection.Time)
+                if (pilotStart + eve.RaceStartIgnoreDetections > detection.Time)
                 {
                     detection.Valid = false;
                 }
@@ -1722,7 +1816,7 @@ namespace RaceLib
                 Logger.RaceLog.LogCall(this);
                 using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
                 {
-                    var types = from round in EventManager.RoundManager.Rounds.OrderBy(r => r.Order)
+                    var types = from round in EventManager.RoundManager.Rounds.Where(r => r.Valid).OrderBy(r => r.Order)
                                 group round by round.EventType into newGroup
                                 select newGroup;
                     
@@ -1757,7 +1851,7 @@ namespace RaceLib
             }
         }
 
-        public string[][] GetRaceResultsText(Units units)
+        public string[][] GetRaceResultsText(Units units, int decimalPlaces)
         {
             List<string[]> output = new List<string[]>();
             foreach (Round round in EventManager.RoundManager.Rounds)
@@ -1772,7 +1866,7 @@ namespace RaceLib
                         line.Add(ec.ToString());
                     }
 
-                    foreach (string[] resultLine in EventManager.ResultManager.GetResultsText(race, units))
+                    foreach (string[] resultLine in EventManager.ResultManager.GetResultsText(race, units, decimalPlaces))
                     {
                         output.Add(resultLine);
                     }
@@ -1781,12 +1875,27 @@ namespace RaceLib
             return output.ToArray();
         }
 
-        public string[][] GetRawLaps()
+        public string[][] GetRawLaps(int decimalPlaces)
+        {
+            return GetRawLaps(Races, decimalPlaces);
+        }
+
+        public string[][] GetRawLaps(Stage stage, int decimalPlaces)
+        {
+            if (stage == null)
+            {
+                return GetRawLaps(decimalPlaces);
+            }
+
+            return GetRawLaps(GetRaces(stage), decimalPlaces);
+        }
+
+        public string[][] GetRawLaps(IEnumerable<Race> exportRaces, int decimalPlaces)
         {
             List<string[]> output = new List<string[]>();
 
-            output.Add(new string[] { "Round", "Race", "Race Start", "Pilot", "Lap Number", "Length", "Race Time", "Valid" });
-            foreach (Race race in Races.OrderBy(r => r.Start))
+            output.Add(new string[] { "Stage", "Round", "Race", "Race Start", "Pilot", "Lap Number", "Length", "Race Time", "Valid" });
+            foreach (Race race in exportRaces.OrderBy(r => r.Start))
             {
                 foreach (Lap lap in race.Laps.OrderBy(l => l.End))
                 {
@@ -1795,13 +1904,16 @@ namespace RaceLib
                     if (pilot != null)
                     {
                         List<string> line = new List<string>();
+
+                        line.Add(race.Round?.Stage?.ToString() ?? "");
                         line.Add(race.RoundNumber.ToString());
                         line.Add(race.RaceNumber.ToString());
                         line.Add(race.Start.ToString());
                         line.Add(pilot.Name);
                         line.Add(lap.Number.ToString());
-                        line.Add(lap.Length.TotalSeconds.ToString("0.000"));
-                        line.Add(lap.EndRaceTime.TotalSeconds.ToString("0.000"));
+                        string exportFormat = "F" + decimalPlaces;
+                        line.Add(lap.Length.TotalSeconds.ToString(exportFormat));
+                        line.Add(lap.EndRaceTime.TotalSeconds.ToString(exportFormat));
                         line.Add(lap.Detection.Valid.ToString());
                         output.Add(line.ToArray());
                     }
@@ -2103,22 +2215,46 @@ namespace RaceLib
         {
             public Channel Channel { get; set; }
             public int ChangeCount { get; set; }
+
+            public override string ToString()
+            {
+                return Channel.ToString() + " change " + ChangeCount;
+            }
         }
 
-        private PreferedChannel GetPreferedChannel(Pilot pilot, Race race)
+        private PreferedChannel GetPreferedChannel(Pilot pilot, int raceOrder)
         {
             PreferedChannel preferedChannel = new PreferedChannel();
 
-            Race[] pilotRaces = GetRaces(r => r.HasPilot(pilot) && r.RaceOrder < race.RaceOrder).ToArray();
+            Race[] pilotRaces = GetRaces(r => r.HasPilot(pilot) && r.Valid && r.RaceOrder < raceOrder).ToArray();
             preferedChannel.ChangeCount = pilot.CountChannelChanges(pilotRaces);
 
-            preferedChannel.Channel = pilotRaces.Where(r => r.RaceOrder < race.RaceOrder).OrderByDescending(r => r.RaceOrder).Select(r => r.GetChannel(pilot)).FirstOrDefault();
+            preferedChannel.Channel = pilotRaces.Where(r => r.RaceOrder < raceOrder).OrderByDescending(r => r.RaceOrder).Select(r => r.GetChannel(pilot)).FirstOrDefault();
             if (preferedChannel.Channel == null)
             {
                 preferedChannel.Channel = EventManager.GetChannel(pilot);
             }
 
             return preferedChannel;
+        }
+
+        public IEnumerable<(Pilot Pilot, Channel Channel)> OrderPilotsForChannelAssignment(IEnumerable<Pilot> pilots, int raceOrder = int.MaxValue)
+        {
+            Pilot[] pilotArray = pilots.ToArray();
+
+            Dictionary<Pilot, PreferedChannel> pilotPrefered = pilotArray.ToDictionary(p => p, p => GetPreferedChannel(p, raceOrder));
+
+            // Count how many pilots want each channel
+            Dictionary<Channel, int> contention = pilotPrefered.Values
+                .Where(pc => pc.Channel != null && pc.Channel != Channel.None)
+                .GroupBy(pc => pc.Channel)
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            // Uncontested pilots go first, then contested ordered by most channel changes
+            return pilotArray
+                .OrderBy(p => contention.TryGetValue(pilotPrefered[p].Channel, out int c) && c > 1 ? 1 : 0)
+                .ThenByDescending(p => pilotPrefered[p].ChangeCount)
+                .Select(p => (p, pilotPrefered[p].Channel));
         }
 
         public void OptimiseChannels(IDatabase db, Race race)
@@ -2128,19 +2264,16 @@ namespace RaceLib
                 return;
             }
 
-            Dictionary<Pilot, PreferedChannel> pilotPrefered = race.Pilots.ToDictionary(p => p, p => GetPreferedChannel(p, race));
+            IEnumerable<(Pilot Pilot, Channel Channel)> orderedPilots = OrderPilotsForChannelAssignment(race.Pilots, race.RaceOrder);
+
             if (!race.ClearPilots(db))
             {
                 return;
             }
 
-            IEnumerable<Channel> channels = EventManager.Channels;
-            
-            var orderedPilots = pilotPrefered.OrderBy(kvp => channels.CountBandTypes(kvp.Value.Channel.Band.GetBandType())).ThenByDescending(kvp => kvp.Value.ChangeCount).ToArray();
-            foreach (var kvp in orderedPilots)
+            foreach ((Pilot pilot, Channel channel) in orderedPilots)
             {
-                Pilot pilot = kvp.Key;
-                Channel preferedChannel = kvp.Value.Channel;
+                Channel preferedChannel = channel;
 
                 if (!race.IsFrequencyFree(preferedChannel))
                 {
@@ -2156,12 +2289,23 @@ namespace RaceLib
             }
         }
 
+
         public Pilot GetPilot(Channel channel)
         {
             Race race = CurrentRace;
             if (race != null)
             {
                 return race.GetPilot(channel);
+            }
+            return null;
+        }
+
+        public Pilot GetPilot(IEnumerable<Channel> channels)
+        {
+            Race race = CurrentRace;
+            if (race != null)
+            {
+                return race.GetPilot(channels);
             }
             return null;
         }
@@ -2331,6 +2475,22 @@ namespace RaceLib
             }
 
             OnRacePilotsSet?.Invoke(race);
+        }
+        public IEnumerable<Pilot> GetPilotsOnChannelLastRace(IEnumerable<Channel> channels)
+        {
+            Race[] finished = GetRaces(r => r.Valid && r.Ended).OrderByDescending(r => r.Start).ToArray();
+
+            List<Pilot> returned = new List<Pilot>();
+
+            foreach (Race race in finished)
+            {
+                Pilot p = race.GetPilot(channels);
+                if (p != null && !returned.Contains(p))
+                {
+                    returned.Add(p);
+                    yield return p;
+                }
+            }
         }
     }
 }

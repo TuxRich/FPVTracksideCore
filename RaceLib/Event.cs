@@ -32,7 +32,8 @@ namespace RaceLib
         CasualPractise = 5,
         CasualPractice = 5,
 
-        Game = 6
+        Game = 6,
+        Training = 7
     }
 
     public enum PrimaryTimingSystemLocation
@@ -171,8 +172,8 @@ namespace RaceLib
             newEvent.EventType = this.EventType;
 
             newEvent.Name = name;
-            newEvent.Start = DateTime.Today;
-            newEvent.End = DateTime.Today + TimeSpan.FromDays(1);
+            newEvent.Start = DateTime.Now;
+            newEvent.End = DateTime.Now + TimeSpan.FromDays(1);
             newEvent.TimeZone = TimeZone;
             
             newEvent.PilotChannels = this.PilotChannels.Select(pc => pc.Clone()).ToList();
@@ -186,17 +187,6 @@ namespace RaceLib
         public override string ToString()
         {
             return Name;
-        }
-
-        public static IEnumerable<EventTypes> GetEventTypes()
-        {
-            yield return EventTypes.Practice;
-            yield return EventTypes.TimeTrial;
-            yield return EventTypes.Race;
-            yield return EventTypes.Endurance;
-            yield return EventTypes.Freestyle;
-            yield return EventTypes.CasualPractice;
-            yield return EventTypes.Game;
         }
 
         public void RefreshPilots(IEnumerable<Pilot> editedPilots)
@@ -258,6 +248,7 @@ namespace RaceLib
         public int Laps { get; set; }
 
         [Category("Race Rules")]
+        [DisplayName("PB Laps / Highlight Laps")]
         public int PBLaps { get; set; }
 
         [Category("Race Rules")]

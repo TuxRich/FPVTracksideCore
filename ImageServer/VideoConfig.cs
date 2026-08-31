@@ -85,9 +85,21 @@ namespace ImageServer
         [System.ComponentModel.Browsable(false)]
         public string ffmpegId { get; set; }
 
+        // Runtime-only override of the device path used to bind to a connected capture
+        // device. Set by VideoManager when the "Legacy UVC Assign" option
+        // is enabled, so that identical same-name cameras each bind to a distinct device
+        // even when their saved paths have gone stale. Never serialized: the saved
+        // DirectShowPath/MediaFoundationPath are left untouched. Null = use the saved path.
+        [System.ComponentModel.Browsable(false)]
+        [JsonIgnore]
+        [XmlIgnore]
+        public string RuntimeDevicePath { get; set; }
+
+        [Category("Device")]
+        public string URL { get; set; }
 
         [System.ComponentModel.Browsable(false)]
-        public string URL { get; set; }
+        public bool IsRTMP => !string.IsNullOrEmpty(URL) && URL.StartsWith("rtmp://", StringComparison.OrdinalIgnoreCase);
 
         [Category("Device")]
         public Mode VideoMode { get; set; }
@@ -117,6 +129,11 @@ namespace ImageServer
         [Category("Device")]
         [DisplayName("Stop feed when not in use")]
         public bool Pauseable { get; set; }
+
+        [Category("Device")]
+        [DisplayName("Hardware Acceleration (where available)")]
+        [ConditionalFrameworks(FrameWork.FFmpeg, FrameWork.MediaFoundation)]
+        public bool HardwareAcceleration { get; set; }
 
         [Category("Layout")]
         [DisplayName("Channel Splits")]
@@ -156,35 +173,6 @@ namespace ImageServer
 
         [Category("Video Recording")]
         public string AudioDevice { get; set; }
-
-        private bool hardwareDecodeAcceleration;
-
-        [Category("Video Recording")]
-        [DisplayName("Hardware Decode Acceleration")]
-        [ConditionalFrameworks(FrameWork.FFmpeg)]
-        public bool HardwareDecodeAcceleration
-        {
-            get => IsCompressedVideoFormat ? hardwareDecodeAcceleration : false;
-            set => hardwareDecodeAcceleration = IsCompressedVideoFormat ? value : false;
-        }
-
-        [Browsable(false)]
-        public bool ShouldShowHardwareDecodeAcceleration => IsCompressedVideoFormat;
-
-        [Browsable(false)]
-        public bool IsCompressedVideoFormat
-        {
-            get
-            {
-                if (VideoMode?.Format == null)
-                    return false;
-
-                // Compressed formats that benefit from hardware decode acceleration
-                var compressedFormats = new[] { "h264", "h265", "hevc", "mjpeg" };
-                return compressedFormats.Contains(VideoMode.Format.ToLower());
-            }
-        }
-
 
         [System.ComponentModel.Browsable(false)]
         [JsonIgnore]
@@ -254,16 +242,16 @@ namespace ImageServer
             FrameTimes = new FrameTime[0];
             DeviceLatency = 0;
             AudioDevice = "None";
-            HardwareDecodeAcceleration = false;
+            HardwareAcceleration = true;
         }
 
         public override string ToString()
         {
             string name = DeviceName;
 
-            if (VideoBounds != null && VideoMode.Index >= 0)
+            if (VideoBounds != null && VideoMode != null && VideoMode.Index >= 0)
             {
-                IEnumerable<SourceTypes> sourceTypesUsed = VideoBounds.Select(vb => vb.SourceType).Distinct();
+                IEnumerable<SourceTypes> sourceTypesUsed = VideoBounds.Where(vb => vb != null).Select(vb => vb.SourceType).Distinct();
                 if (sourceTypesUsed.Count() == 1)
                 {
                     name = name + " (" + sourceTypesUsed.First().ToString() + ")";
@@ -320,10 +308,20 @@ namespace ImageServer
             c.ChannelCoveragePercent = ChannelCoveragePercent;
             c.DeviceName = DeviceName;
             c.FilePath = FilePath;
+            c.ffmpegId = ffmpegId;
+            c.URL = URL;
+            c.AnyUSBPort = AnyUSBPort;
             c.VideoMode = VideoMode;
+            c.FlipMirrored = FlipMirrored;
             c.Pauseable = Pauseable;
+            c.Splits = Splits;
             c.RecordVideoForReplays = RecordVideoForReplays;
-            c.FrameWork = FrameWork;
+            c.RecordResolution = RecordResolution;
+            c.RecordFrameRate = RecordFrameRate;
+            c.DeviceLatency = DeviceLatency;
+            c.AudioDevice = AudioDevice;
+            c.HardwareAcceleration = HardwareAcceleration;
+            c.VideoBounds = VideoBounds.Select(vb => vb.Clone()).ToArray();
             return c;
         }
 

@@ -22,15 +22,13 @@ namespace WindowsPlatform.GDI
         public DateTime Start { get; private set; }
         public DateTime LastFrame { get; private set; }
 
-        public event Action<GraphicsDevice, LayerStack> OnInitialise;
-
         private Point oldMouse;
 
         public GDILayerStackControl()
         {
             oldMouse = new Point(0, 0);
 
-            LayerStack = new GDILayerStack(new WindowsPlatformTools());
+            LayerStack = new GDILayerStack(new WindowsPlatformToolsGDI());
             LayerStack.InputEventFactory.CreateKeyboardEvents = false;
             LayerStack.InputEventFactory.CreateMouseEvents = false;
 

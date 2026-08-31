@@ -48,7 +48,6 @@ namespace UI.Nodes.Rounds
 
             base.Dispose();
         }
-
         private void OnLapDisqualified(Lap lap)
         {
             // Don't refresh mid-race.
@@ -72,7 +71,9 @@ namespace UI.Nodes.Rounds
         protected override void UpdateButtons()
         {
             base.UpdateButtons();
-            canAddFinal = Round.StageType != StageTypes.Final;
+
+            if (Round != null)
+                canAddFinal = Round.StageType != StageTypes.Final;
 
             if (MenuButton != null)
                 MenuButton.Scale(0.6f);
@@ -96,6 +97,10 @@ namespace UI.Nodes.Rounds
             mm.AddItem("Copy to Clipboard", CopyToClipboard);
 
             FileTools.ExportMenu(mm, "Export", PlatformTools, "Save", MakeTable(), GetLayer<PopupLayer>());
+
+            int exportDecimalPlaces = ApplicationProfileSettings.Instance.ExportDecimalPlaces;
+            FileTools.ExportMenu(mm, "Export Raw Laps", PlatformTools, "Save Top Consecutive Laps", EventManager.RaceManager.GetRawLaps(Round?.Stage, exportDecimalPlaces), GetLayer<PopupLayer>());
+               
             mm.AddItemConfirm("Re-calculate", Recalculate);
         }
 
@@ -171,7 +176,7 @@ namespace UI.Nodes.Rounds
             }
         }
 
-        public virtual IEnumerable<T> Order(IEnumerable<T> nodes)
+        public new virtual IEnumerable<T> Order(IEnumerable<T> nodes)
         {
             return PilotNodes;
         }
@@ -249,6 +254,13 @@ namespace UI.Nodes.Rounds
             base.CalculateAspectRatio(height);
         }
 
+
+        public override bool IsRoundInStage()
+        {
+            // Result nodes are in a stage, but returning true here causes new rounds added
+            // from this node to inherit the result stage. New rounds should have no stage.
+            return false;
+        }
 
         protected override void AddButtonRoundMenu(MouseMenu addRound)
         {

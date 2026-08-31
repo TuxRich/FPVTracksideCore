@@ -22,6 +22,15 @@ namespace ExternalData
         Error
     }
 
+    public class RemoteEventInfo
+    {
+        public Guid ID { get; set; }
+        public int ExternalID { get; set; }
+        public string Name { get; set; }
+        public DateTime Start { get; set; }
+        public SyncType Source { get; set; }
+    }
+
     public interface ISync
     {
         SyncType SyncType { get; }
@@ -30,10 +39,13 @@ namespace ExternalData
 
         bool CanSyncDownRoundRaces { get; }
 
-        void SyncDownEvents(WorkSet workSet, WorkQueue queue);
+        IEnumerable<RemoteEventInfo> GetRemoteEvents();
+        void SyncDownEvent(WorkSet workSet, WorkQueue queue, RemoteEventInfo eventInfo);
+
         void SyncDownRoundRaces(WorkSet workSet, WorkQueue queue, EventManager eventManager);
 
         void SyncUpEvent(WorkSet workSet, WorkQueue queue, Guid eventID);
+        void SyncUpRace(WorkSet workSet, WorkQueue queue, EventManager eventManager, Race race);
         void SyncUpResults(WorkSet workSet, WorkQueue queue, EventManager eventManager);
 
         LoginType Login(string authkey);

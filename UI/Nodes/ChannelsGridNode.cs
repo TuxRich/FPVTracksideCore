@@ -5,6 +5,7 @@ using ImageServer;
 using Microsoft.Xna.Framework;
 using OfficeOpenXml.Style;
 using RaceLib;
+using Sound;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -64,7 +65,9 @@ namespace UI.Nodes
 
         public AutoCrashOut AutoCrashOut { get; private set; }
 
-        private VideoTimingManager videoTimingManager;
+        public bool AlwaysShowAllChannels { get; set; }
+
+        private UI.Video.ArucoTimingManager arucoTimingManager;
 
         private List<ChannelVideoInfo> channelInfos;
 
@@ -137,8 +140,6 @@ namespace UI.Nodes
             channelCreationLock = new object();
             channelInfos = new List<ChannelVideoInfo>();
 
-            videoTimingManager = new VideoTimingManager(eventManager.RaceManager.TimingSystemManager, this);
-
             EventManager = eventManager;
             VideoManager = videoManager;
 
@@ -179,12 +180,22 @@ namespace UI.Nodes
             EventManager.RaceManager.OnRaceEnd -= RaceManager_OnRaceEnd;
             EventManager.RaceManager.OnRaceChanged -= RaceManager_OnRaceChanged;
             EventManager.OnPilotRefresh -= Refresh;
-
-            videoTimingManager?.Dispose();
             AutoCrashOut?.Dispose();
+
+            arucoTimingManager?.Dispose();
             base.Dispose();
         }
 
+        public void InitVideoTimingSystems()
+        {
+            arucoTimingManager?.Dispose();
+
+            // Skip ArUco detection on playback grids — the ReplayNode spawns its own
+            // ChannelsGridNode for recorded video, and running detection there would burn FPS
+            // text into the replay output and fight with the live grid for the global overlay
+            // state (Enabled/ShowFps/cache).
+            arucoTimingManager = new UI.Video.ArucoTimingManager(EventManager.RaceManager.TimingSystemManager, this);
+        }
 
         private void RaceManager_OnRaceChanged(Race race)
         {
@@ -285,8 +296,11 @@ namespace UI.Nodes
                         }
                         cbn.SetAnimatedVisibility(visible);
                     }
+                    else if (AlwaysShowAllChannels && cbn.Pilot == null)
+                    {
+                        cbn.SetAnimatedVisibility(true);
+                    }
                 }
-
 
                 foreach (CamGridNode camNode in CamNodes)
                 {
@@ -297,7 +311,7 @@ namespace UI.Nodes
                 {
                     int visibleNodes = VisibleChildCount();
                     downPilotsList.UpdateDown(ChannelNodes);
-                    downPilotsList.SetAnimatedVisibility(crashed >= 1 && visibleNodes > 1);
+                    downPilotsList.SetAnimatedVisibility(downPilotsList.DownChannelNodes.Any() && visibleNodes > 1);
                 }
 
                 CheckGridStatsVisiblilty();
@@ -358,7 +372,7 @@ namespace UI.Nodes
             {
                 case ReOrderTypes.None:
                 default:
-                    output = input;
+                    output = input.OfType<ChannelNodeBase>();
                     break;
                 case ReOrderTypes.ChannelOrder:
                     // Order by channel
@@ -403,9 +417,21 @@ namespace UI.Nodes
             ChannelNodeBase cn = GetCreateChannelNode(ci.Channel);
             if (cn != null)
             {
-                cn.Visible = false;
+                cn.Visible = AlwaysShowAllChannels;
+                cn.SetLapsVisible(EventManager.RaceManager.RaceType.HasLaps());
                 cn.Snap();
             }
+        }
+
+        public void EnsureChannelNode(Channel c)
+        {
+            if (ChannelNodes.Any(cn => cn.Channel == c))
+                return;
+
+            ChannelNodeBase cn = GetCreateChannelNode(c);
+            cn.Visible = AlwaysShowAllChannels;
+            cn.SetLapsVisible(EventManager.RaceManager.RaceType.HasLaps());
+            cn.Snap();
         }
 
         public void ClearVideo()
@@ -440,6 +466,21 @@ namespace UI.Nodes
             }
 
             return channelNodeBase;
+        }
+
+        private void OnChannelQRPilotDetected(Channel channel, string pilotName)
+        {
+            Pilot pilot = EventManager.Event.Pilots.FirstOrDefault(p => p.Name.Equals(pilotName, StringComparison.OrdinalIgnoreCase));
+            if (pilot != null)
+            {
+                if (!EventManager.RaceManager.HasPilot(pilot))
+                {
+                    SoundManager.Instance.QRCheckedIn(pilot, channel);
+                    EventManager.RaceManager.AddPilot(channel, pilot);
+                    return;
+                }
+            }
+            SoundManager.Instance.QRCheckedInNotAPilot();
         }
 
         public void OnRaceManagerAddPilot(PilotChannel pilotChannel)
@@ -524,6 +565,7 @@ namespace UI.Nodes
                     channelNode.Init();
                     channelNode.FrameNode.RelativeSourceBounds = ci.ScaledRelativeSourceBounds;
                     channelNode.FrameNode.SetAspectRatio(withLaps);
+                    channelNode.OnQRPilotDetected += OnChannelQRPilotDetected;
                     AutoCrashOut?.AddChannelNode(channelNode);
 
                     channelNodeBase = channelNode;
@@ -545,6 +587,8 @@ namespace UI.Nodes
                     OnChannelNodeCloseClick?.Invoke(channelNodeBase);
                     Reorder();
                 };
+
+                channelNodeBase.AllowCrashedOut = !AlwaysShowAllChannels;
 
                 channelNodeBase.OnCrashedOutClick += () =>
                 {
@@ -577,13 +621,29 @@ namespace UI.Nodes
             RemovePilot(pc.Pilot);
         }
 
+        private void ShowChannelNode(ChannelNodeBase cn)
+        {
+            if (!cn.Visible)
+            {
+                cn.SetAnimatedVisibility(true);
+            }
+        }
+
+        private void HideChannelNode(ChannelNodeBase cn)
+        {
+            if (!AlwaysShowAllChannels && cn.Visible)
+            {
+                cn.SetAnimatedVisibility(false);
+            }
+        }
+
         public void RemovePilot(Pilot p)
         {
             ChannelNodeBase channelNode = ChannelNodes.FirstOrDefault(lpn => lpn.Pilot == p);
             if (channelNode != null)
             {
                 channelNode.SetPilot(null);
-                channelNode.SetAnimatedVisibility(false);
+                HideChannelNode(channelNode);
 
                 Reorder(true);
             }
@@ -627,7 +687,7 @@ namespace UI.Nodes
             {
                 cn.LapsNode.ClearLaps();
                 cn.SetPilot(null);
-                cn.SetAnimatedVisibility(false);
+                HideChannelNode(cn);
             }
             Reorder(true);
         }
@@ -728,7 +788,7 @@ namespace UI.Nodes
             {
                 foreach (ChannelNodeBase cn in pilotNodes)
                 {
-                    cn.SetAnimatedVisibility(true);
+                    ShowChannelNode(cn);
                     cn.SetCrashedOutType(CrashState.ManualUp);
                 }
 
@@ -758,7 +818,7 @@ namespace UI.Nodes
             {
                 foreach (ChannelNodeBase cn in emptyNodes)
                 {
-                    cn.SetAnimatedVisibility(false);
+                    HideChannelNode(cn);
                 }
 
                 RequestLayout();

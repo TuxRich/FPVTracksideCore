@@ -94,6 +94,14 @@ namespace UI
 
         private TimeSpan pausedAt;
 
+        public virtual bool ShowText
+        {
+            get
+            {
+                return false;
+            }
+        }
+
         public AutoRunner(EventLayer eventLayer) 
         { 
             EventLayer = eventLayer;
@@ -261,12 +269,12 @@ namespace UI
                     break;
 
                 case AutoRunnerConfig.AutoCreateRoundsTypes.CloneLast:
-                    EventManager.RoundManager.CloneRound(round);
+                    EventManager.RoundManager.CloneRound(round, round.Stage);
                     break;
             }
         }
 
-        public void Update()
+        public virtual void Update()
         {
             DateTime now = DateTime.Now;
 
@@ -379,7 +387,7 @@ namespace UI
 
             foreach (Channel channel in race.Channels) 
             {
-                if (!AutoCrashOut.HasMotion(channel))
+                if (!AutoCrashOut.IsActive(channel))
                 {
                     badChannel = channel;
                     return false;

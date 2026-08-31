@@ -22,7 +22,7 @@ namespace RaceLib
 
         public IEnumerable<FileInfo> GetPilotProfileMedia()
         {
-            DirectoryInfo pilotProfileDirectory = new DirectoryInfo("pilots");
+            DirectoryInfo pilotProfileDirectory = new DirectoryInfo(IOTools.ResolveFromWorkingDirectory("pilots"));
 
             if (pilotProfileDirectory.Exists)
             {
@@ -43,7 +43,7 @@ namespace RaceLib
 
         public void FindProfilePictures(Pilot[] pilots)
         {
-            string currentDirectory = Directory.GetCurrentDirectory();
+            string workingDirectory = IOTools.WorkingDirectory.FullName;
 
             List<string> listOfExt = extensions.ToList();
 
@@ -63,7 +63,11 @@ namespace RaceLib
                         string oldPath = p.PhotoPath;
                         if (string.IsNullOrEmpty(p.PhotoPath))
                         {
-                            IEnumerable<FileInfo> matches = media.Where(f => f.Name.ToLower().Contains(p.Name.ToLower()));
+                            // macOS stores file names decomposed (NFD), so both sides are
+                            // brought to NFC before comparing. The matched FileInfo keeps
+                            // the on-disk name for the actual file access.
+                            string pilotName = p.Name.NormaliseUnicode().ToLower();
+                            IEnumerable<FileInfo> matches = media.Where(f => f.Name.NormaliseUnicode().ToLower().Contains(pilotName));
                             if (matches.Any())
                             {
                                 p.PhotoPath = matches.OrderByDescending(f => listOfExt.IndexOf(f.Extension)).FirstOrDefault().FullName;
@@ -71,7 +75,7 @@ namespace RaceLib
                         }
                         if (!string.IsNullOrEmpty(p.PhotoPath))
                         {
-                            p.PhotoPath = Path.GetRelativePath(currentDirectory, p.PhotoPath);
+                            p.PhotoPath = Path.GetRelativePath(workingDirectory, IOTools.ResolveFromWorkingDirectory(p.PhotoPath));
                         }
                     }
                     catch (Exception ex)
@@ -83,7 +87,7 @@ namespace RaceLib
                     {
                         if (p.PhotoPath == null)
                         {
-                            Patreon match = patreonWithHandle.FirstOrDefault(pa => pa.Handle.ToLower() == p.Name.ToLower());
+                            Patreon match = patreonWithHandle.FirstOrDefault(pa => pa.Handle.NormaliseUnicode().ToLower() == p.Name.NormaliseUnicode().ToLower());
                             if (match != null)
                             {
                                 p.PhotoPath = match.ThumbFilename;

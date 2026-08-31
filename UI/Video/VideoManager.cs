@@ -260,18 +260,22 @@ namespace UI.Video
             }
         }
 
-        public bool GetStatus(VideoConfig videoConfig, out bool connected, out bool recording, out int height)
+        public bool GetStatus(VideoConfig videoConfig, out bool connected, out bool recording, out int height, out float fps, out FrameSource.States state)
         {
             connected = false;
             recording = false;
             height = 0;
+            fps = 0;
+            state = FrameSource.States.Stopped;
 
             FrameSource frameSource = GetFrameSource(videoConfig);
             if (frameSource != null)
             {
+                state = frameSource.State;
                 connected = frameSource.Connected;
                 recording = frameSource.Recording;
                 height = frameSource.FrameHeight;
+                fps = frameSource.MeasuredFps;
                 return true;
             }
 
@@ -352,12 +356,6 @@ namespace UI.Video
                             // DS can be viewed just fine in the better MF.
                             if (recordingFrameWork == FrameWork.DirectShow)
                                 recordingFrameWork = FrameWork.MediaFoundation;
-
-#if !DEBUG
-                            // TODO Remove this once ffmpeg playback is working in windows..
-                            if (recordingFrameWork == FrameWork.FFmpeg && available.Contains(FrameWork.MediaFoundation))
-                                recordingFrameWork = FrameWork.MediaFoundation;
-#endif
 
                             // just use the first available if the recording one isn't ok.
                             if (!available.Contains(recordingFrameWork) && available.Any())
@@ -590,8 +588,18 @@ namespace UI.Video
         {
             DoOnWorkerThread(() =>
             {
+                IEnumerable<VideoConfig> toCreate = videoConfigs;
+                bool hasDuplicates = videoConfigs
+                    .Where(v => IsOrdinalMatchable(v))
+                    .GroupBy(v => v.DeviceName?.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .Any(g => g.Count() > 1);
+                if (hasDuplicates)
+                {
+                    toCreate = AssignDuplicateDevices(videoConfigs);
+                }
+
                 List<FrameSource> list = new List<FrameSource>();
-                foreach (var videoConfig in videoConfigs)
+                foreach (var videoConfig in toCreate)
                 {
                     RemoveFrameSource(videoConfig);
                     FrameSource fs = CreateFrameSource(videoConfig);
@@ -603,6 +611,94 @@ namespace UI.Video
                     frameSourcesDelegate(list);
                 }
             });
+        }
+
+        private IEnumerable<VideoConfig> AssignDuplicateDevices(IEnumerable<VideoConfig> videoConfigs)
+        {
+            VideoConfig[] configs = videoConfigs.ToArray();
+
+            // Recompute from scratch every time: clear any previous runtime resolution.
+            foreach (VideoConfig vc in configs)
+            {
+                vc.RuntimeDevicePath = null;
+            }
+
+            List<VideoConfig> live;
+            try
+            {
+                live = GetAvailableVideoSources().ToList();
+            }
+            catch (Exception e)
+            {
+                Logger.VideoLog.LogException(this, e);
+                return configs;
+            }
+
+            HashSet<string> claimed = new HashSet<string>();
+
+            // Pass 1: configs whose saved path matches a connected device claim that device.
+            foreach (VideoConfig config in configs)
+            {
+                if (!IsOrdinalMatchable(config))
+                    continue;
+
+                string savedPath = StoredDevicePath(config);
+                VideoConfig match = live.FirstOrDefault(l => l.FrameWork == config.FrameWork
+                    && !string.IsNullOrEmpty(savedPath) && StoredDevicePath(l) == savedPath);
+                if (match != null)
+                {
+                    claimed.Add(DeviceKey(match));
+                }
+            }
+
+            // Pass 2: configs whose saved path no longer matches get the next unclaimed same-name device.
+            foreach (VideoConfig config in configs)
+            {
+                if (!IsOrdinalMatchable(config))
+                    continue;
+
+                string savedPath = StoredDevicePath(config);
+                bool alreadyConnected = !string.IsNullOrEmpty(savedPath)
+                    && live.Any(l => l.FrameWork == config.FrameWork && StoredDevicePath(l) == savedPath);
+                if (alreadyConnected)
+                    continue;
+
+                VideoConfig candidate = live.FirstOrDefault(l => l.FrameWork == config.FrameWork
+                    && string.Equals(l.DeviceName == null ? null : l.DeviceName.Trim(), config.DeviceName == null ? null : config.DeviceName.Trim(), StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrEmpty(StoredDevicePath(l))
+                    && !claimed.Contains(DeviceKey(l)));
+
+                if (candidate != null)
+                {
+                    claimed.Add(DeviceKey(candidate));
+                    config.RuntimeDevicePath = StoredDevicePath(candidate);
+                    Logger.VideoLog.Log(this, "Duplicate UVC: assigned '" + config.DeviceName + "' to " + config.RuntimeDevicePath);
+                }
+            }
+
+            return configs;
+        }
+
+        private static bool IsOrdinalMatchable(VideoConfig config)
+        {
+            return config != null
+                && string.IsNullOrEmpty(config.FilePath)
+                && (config.FrameWork == FrameWork.DirectShow || config.FrameWork == FrameWork.MediaFoundation);
+        }
+
+        private static string StoredDevicePath(VideoConfig config)
+        {
+            switch (config.FrameWork)
+            {
+                case FrameWork.DirectShow: return config.DirectShowPath;
+                case FrameWork.MediaFoundation: return config.MediaFoundationPath;
+                default: return null;
+            }
+        }
+
+        private static string DeviceKey(VideoConfig config)
+        {
+            return config.FrameWork + "|" + StoredDevicePath(config);
         }
 
         public void Initialize(FrameSource frameSource)
@@ -785,7 +881,10 @@ namespace UI.Video
                                 if (source.FrameTimes != null && source.FrameTimes.Any())
                                 {
                                     RecodingInfo vi = new RecodingInfo(source);
-                                    FileInfo videoFile = new FileInfo(vi.FilePath);
+                                    // FilePath is stored relative to the working directory, so it
+                                    // has to be resolved before the .recordinfo.xml is placed
+                                    // next to the video file.
+                                    FileInfo videoFile = new FileInfo(IOTools.ResolveFromWorkingDirectory(vi.FilePath));
                                     FileInfo recordingInfo = GetRecordingInfoFileName(videoFile);
                                     IOTools.Write(recordingInfo.Directory.FullName, recordingInfo.Name, vi);
                                     needsVideoInfoWrite.Remove((FrameSource)source);
@@ -943,40 +1042,59 @@ namespace UI.Video
                 try
                 {
                     List<Mode> modes = new List<Mode>();
-                    IHasModes frameSource = GetFrameSource(vs) as IHasModes;
-                    if (frameSource != null && !forceAll)
+
+                    // RTMP sources have a static mode list — skip the forceAll loop which would
+                    // try DirectShow/MediaFoundation against a URL they can't handle.
+                    if (vs.IsRTMP)
                     {
-                        modes.AddRange(frameSource.GetModes());
+                        VideoFrameWork ffmpeg = VideoFrameWorks.GetFramework(FrameWork.FFmpeg);
+                        if (ffmpeg != null)
+                        {
+                            FrameSource source = ffmpeg.CreateFrameSource(vs);
+                            if (source != null)
+                            {
+                                modes.AddRange(source.GetModes());
+                                source.Dispose();
+                            }
+                        }
                     }
                     else
                     {
-                        // Clear the video mode so it's not a problem getting new modes if the current one doesnt work?
-                        VideoConfig clone = vs.Clone();
-                        clone.VideoMode = new Mode();
-
-                        foreach (VideoFrameWork frameWork in VideoFrameWorks.Available)
+                        IHasModes frameSource = GetFrameSource(vs) as IHasModes;
+                        if (frameSource != null && !forceAll)
                         {
-                            FrameSource source = null;
-                            try
-                            {
-                                // Create a temporary instance just to get the modes...
-                                source = frameWork.CreateFrameSource(clone);
-                                if (source == null)
-                                    break;
+                            modes.AddRange(frameSource.GetModes());
+                        }
+                        else
+                        {
+                            // Clear the video mode so it's not a problem getting new modes if the current one doesnt work?
+                            VideoConfig clone = vs.Clone();
+                            clone.VideoMode = new Mode();
 
-                                modes.AddRange(source.GetModes());
-                                if (source.RebootRequired)
+                            foreach (VideoFrameWork frameWork in VideoFrameWorks.Available)
+                            {
+                                FrameSource source = null;
+                                try
                                 {
-                                    result.RebootRequired = true;
+                                    // Create a temporary instance just to get the modes...
+                                    source = frameWork.CreateFrameSource(clone);
+                                    if (source == null)
+                                        break;
+
+                                    modes.AddRange(source.GetModes());
+                                    if (source.RebootRequired)
+                                    {
+                                        result.RebootRequired = true;
+                                    }
                                 }
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.VideoLog.LogException(this, ex);
-                            }
-                            finally
-                            {
-                                source?.Dispose();
+                                catch (Exception ex)
+                                {
+                                    Logger.VideoLog.LogException(this, ex);
+                                }
+                                finally
+                                {
+                                    source?.Dispose();
+                                }
                             }
                         }
                     }

@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -69,7 +70,7 @@ namespace FfmpegMediaPlatform
         /// <summary>
         /// Start recording RGBA frames to an MP4 file using FFmpeg.AutoGen
         /// </summary>
-        public bool StartRecording(string outputPath, int frameWidth, int frameHeight, float frameRate, ICaptureFrameSource captureFrameSource = null)
+        public bool StartRecording(string outputPath, int frameWidth, int frameHeight, float frameRate, ICaptureFrameSource captureFrameSource = null, bool hardwareAcceleration = true)
         {
             if (disposed)
             {
@@ -114,7 +115,7 @@ namespace FfmpegMediaPlatform
                     frameQueueSemaphore = new System.Threading.SemaphoreSlim(0);
 
                     // Initialize FFmpeg encoder
-                    if (!InitializeEncoder(outputPath, frameWidth, frameHeight, frameRate))
+                    if (!InitializeEncoder(outputPath, frameWidth, frameHeight, frameRate, hardwareAcceleration))
                     {
                         Tools.Logger.VideoLog.LogCall(this, "Failed to initialize FFmpeg encoder");
                         return false;
@@ -143,7 +144,7 @@ namespace FfmpegMediaPlatform
         /// <summary>
         /// Initialize FFmpeg encoder with direct PTS control
         /// </summary>
-        private unsafe bool InitializeEncoder(string outputPath, int width, int height, float frameRate)
+        private unsafe bool InitializeEncoder(string outputPath, int width, int height, float frameRate, bool hardwareAcceleration = true)
         {
             try
             {
@@ -162,7 +163,7 @@ namespace FfmpegMediaPlatform
                 string encoderName = null;
 
                 // Try hardware encoders based on platform
-                if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX))
+                if (hardwareAcceleration && System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX))
                 {
                     // macOS: Try VideoToolbox (Apple hardware encoder)
                     codec = ffmpeg.avcodec_find_encoder_by_name("h264_videotoolbox");
@@ -171,7 +172,7 @@ namespace FfmpegMediaPlatform
                         encoderName = "h264_videotoolbox (macOS VideoToolbox - GPU accelerated)";
                     }
                 }
-                else if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+                else if (hardwareAcceleration && System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
                 {
                     // Windows: Try NVIDIA NVENC first (most common GPU), then Intel QSV, then AMD AMF
                     string[] windowsEncoders = new[]
@@ -204,7 +205,8 @@ namespace FfmpegMediaPlatform
                     codec = ffmpeg.avcodec_find_encoder(AVCodecID.AV_CODEC_ID_H264);
                     if (codec != null)
                     {
-                        encoderName = "libx264 (software - CPU)";
+                        string name = Marshal.PtrToStringAnsi((IntPtr)codec->name);
+                        encoderName = $"{name} (software - CPU)";
                     }
                 }
 
@@ -248,8 +250,15 @@ namespace FfmpegMediaPlatform
                 // Frame rate
                 codecContext->framerate = new AVRational { num = (int)(frameRate * 1000), den = 1000 };
 
-                // Bitrate and quality settings
-                codecContext->bit_rate = width * height * 4; // Reasonable bitrate
+                // Bitrate and quality settings.
+                // Match the Windows MediaFoundation recorder (H264Encoder.GetBitRate): ~12 Mbps at
+                // 1280x720@30, scaled by pixel count AND framerate. The previous width*height*4
+                // formula ignored framerate and produced ~1/3 of the Windows bitrate (e.g. 3.7 Mbps
+                // vs 12 Mbps at 720p30), which is why recordings looked far lower quality on macOS.
+                const int goodBitrate = 12_000_000;
+                const int goodPixelCount = 1280 * 720 * 30;
+                float bitrateRatio = goodBitrate / (float)goodPixelCount;
+                codecContext->bit_rate = (long)(bitrateRatio * width * height * frameRate);
                 codecContext->gop_size = 3; // Keyframe every 3 frames (~0.1s at 30fps) for precise seeking
                 codecContext->max_b_frames = 0; // No B-frames for lower latency
                 codecContext->keyint_min = 3; // Minimum GOP size - ensures regular keyframes
@@ -371,8 +380,14 @@ namespace FfmpegMediaPlatform
                         lastFrameWriteTime = captureTime;
                     }
 
-                    // Queue frame for async writing
-                    frameQueue.Enqueue((rgbaData, captureTime, frameNumber));
+                    // Rent a pooled buffer and copy the frame data. The encoding worker returns
+                    // the buffer to the pool after EncodeFrame completes, so the caller's buffer
+                    // is safe to reuse immediately after this method returns.
+                    // Buffer.BlockCopy is SIMD-vectorised — do not replace with Parallel.For.
+                    byte[] pooledBuffer = ArrayPool<byte>.Shared.Rent(rgbaData.Length);
+                    Buffer.BlockCopy(rgbaData, 0, pooledBuffer, 0, rgbaData.Length);
+
+                    frameQueue.Enqueue((pooledBuffer, captureTime, frameNumber));
                     frameQueueSemaphore.Release();
 
                     // Collect frame timing for XML
@@ -413,9 +428,17 @@ namespace FfmpegMediaPlatform
 
                     if (frameQueue.TryDequeue(out var frameData))
                     {
-                        if (IsEncoderReady())
+                        try
                         {
-                            EncodeFrame(frameData.rgbaData, frameData.captureTime);
+                            if (IsEncoderReady())
+                            {
+                                EncodeFrame(frameData.rgbaData, frameData.captureTime);
+                            }
+                        }
+                        finally
+                        {
+                            // Return pooled buffer rented in WriteFrame
+                            ArrayPool<byte>.Shared.Return(frameData.rgbaData);
                         }
                     }
                 }

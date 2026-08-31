@@ -13,6 +13,11 @@ namespace Tools
 {
     public class Logger : IDisposable
     {
+#if !DEBUG
+        // One active log plus up to 49 numbered archives (approximately 50 MB).
+        private const int MaximumProductionLogFiles = 50;
+#endif
+        private const long MaximumLogFileSize = 1024 * 1024;
 
         public static Logger UI { get; private set; }
         public static Logger TimingLog { get; private set; }
@@ -26,6 +31,7 @@ namespace Tools
         public static Logger Sheets { get; private set; }
         public static Logger OBS { get; private set; }
         public static Logger AutoRunner { get; private set; }
+        public static Logger Browser { get; private set; }
         public static Logger AllLog { get; private set; }
 
         public static CrashLogger CrashLogger { get; private set; }
@@ -46,6 +52,7 @@ namespace Tools
                 yield return Sheets;
                 yield return OBS;
                 yield return AutoRunner;
+                yield return Browser;
                 yield return AllLog;
             }
         }
@@ -76,6 +83,7 @@ namespace Tools
             Sync = new Logger(logDir, "Sync", AllLog);
             Sheets = new Logger(logDir, "Sheets", AllLog);
             OBS = new Logger(logDir, "OBS", AllLog);
+            Browser = new Logger(logDir, "Browser", AllLog);
             AutoRunner = new Logger(logDir, "AutoRunner", AllLog);
 
             CrashLogger = new CrashLogger(logDir);
@@ -171,17 +179,44 @@ namespace Tools
         private void DoSizeCheck()
         {
             FileInfo fi = new FileInfo(filename);
-            if (fi.Exists)
+#if !DEBUG
+            int archiveLimit = MaximumProductionLogFiles - 1;
+            if (fi.Exists && fi.Length > MaximumLogFileSize)
             {
-                if (fi.Length > 1024 * 1024)
+                // Leave a slot for the active log that is about to be archived.
+                archiveLimit--;
+            }
+
+            var archivedLogs = fi.Directory
+                .GetFiles(fi.Name + "*")
+                .Select(file => new
                 {
-                    int counter = 1;
-                    while (File.Exists(fi.FullName + counter))
-                    {
-                        counter++;
-                    }
-                    fi.MoveTo(fi.FullName + counter);
+                    File = file,
+                    Suffix = file.Name.Substring(fi.Name.Length)
+                })
+                .Where(archive => int.TryParse(archive.Suffix, out int index) && index > 0)
+                .OrderByDescending(archive => archive.File.LastWriteTimeUtc)
+                .ToArray();
+
+            foreach (var archivedLog in archivedLogs.Skip(archiveLimit))
+            {
+                archivedLog.File.Delete();
+            }
+#endif
+
+            if (fi.Exists && fi.Length > MaximumLogFileSize)
+            {
+                int counter = 1;
+#if !DEBUG
+                while (counter < MaximumProductionLogFiles && File.Exists(fi.FullName + counter))
+#else
+                while (File.Exists(fi.FullName + counter))
+#endif
+                {
+                    counter++;
                 }
+
+                fi.MoveTo(fi.FullName + counter);
             }
         }
 
@@ -255,7 +290,7 @@ namespace Tools
 
         public void LogDebugCall(object caller, params object[] targets)
         {
-#if DEBUG
+#if DEBUG_VIDEO
             LogCall(caller, targets);
 #endif  
         }

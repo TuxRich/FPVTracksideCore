@@ -1,8 +1,10 @@
-﻿using Composition.Input;
+﻿using Composition;
+using Composition.Input;
 using Composition.Nodes;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,6 +18,11 @@ namespace UI
     {
         public static ApplicationProfileSettings Instance { get; protected set; }
         public static Profile ProfileInstance { get; protected set; }
+
+        [Browsable(false)]
+        public int SettingsVersion { get; set; }
+
+        protected virtual string ProductId => "FPVTrackside";
 
         public enum OrderTypes
         {
@@ -33,14 +40,14 @@ namespace UI
 
         [Category("General")]
         public RaceLib.Units Units { get; set; }
-
-        [Category("General")]
-        [DisplayName("'Sponsored By' messages.")]
-        public bool SponsoredByMessages { get; set; }
-
+        
         [Category("General")]
         [NeedsRestart]
         public int ShownDecimalPlaces { get; set; }
+
+        [Category("General")]
+        [DisplayName("Export Decimal Places")]
+        public int ExportDecimalPlaces { get; set; }
 
 
         [Category("Performance")]
@@ -54,6 +61,11 @@ namespace UI
 
         [Category("Performance")]
         [NeedsRestart]
+        [DisplayName("Anti-Aliasing (MSAA)")]
+        public bool AntiAliasing { get; set; }
+
+        [Category("Performance")]
+        [NeedsRestart]
         [DisplayName("UI / Font Scale (Percent)")]
         public float InverseResolutionScalePercent { get; set; }
 
@@ -62,20 +74,64 @@ namespace UI
         [NeedsRestart]
         public bool UseDirectX9 { get; set; }
 
+        public enum TextRendererBackend
+        {
+            WPF,
+            Skia
+        }
+
+        [Category("Performance")]
+        [DisplayName("Text Renderer")]
+        [NeedsRestart]
+        public TextRendererBackend TextRenderer { get; set; }
+
         [DisplayName("Video recordings to keep")]
         [Category("Video")]
         public int VideosToKeep { get; set; }
-        [Category("Data")]
+[Category("Data")]
         [NeedsRestart]
-        public string EventStorageLocation { get; set; }
+        [System.Xml.Serialization.XmlElement("EventStorageLocation")]
+        public string EventStorageLocationRelative { get; set; }
+
+        /// <summary>
+        /// EventStorageLocationRelative resolved against IOTools.WorkingDirectory.
+        /// Use this everywhere the location is actually opened; the setting itself
+        /// stays relative (or "~"-prefixed) so it remains portable between machines.
+        /// Absolute paths are used as-is.
+        /// </summary>
+        [System.Xml.Serialization.XmlIgnore]
+        [Browsable(false)]
+        public DirectoryInfo EventStorageDirectory
+        {
+            get
+            {
+                string location = EventStorageLocationRelative;
+
+                // Trim off some legacy slashes.
+                if (!string.IsNullOrEmpty(location) && (location.EndsWith("/") || location.EndsWith("\\")))
+                {
+                    location = location.Substring(0, location.Length - 1);
+                }
+
+                if (string.IsNullOrEmpty(location))
+                {
+                    location = "events";
+                }
+
+                // Expand a leading "~" to the user's home directory.
+                if (location == "~" || location.StartsWith("~/") || location.StartsWith("~\\"))
+                {
+                    string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    location = location.Length == 1 ? home : Path.Combine(home, location.Substring(2));
+                }
+
+                return new DirectoryInfo(IOTools.ResolveFromWorkingDirectory(location));
+            }
+        }
 
         [Category("Static Detector")]
         [NeedsRestart]
         public bool VideoStaticDetector { get; set; }
-        [Category("Static Detector")]
-        public float CrashThreshold { get; set; }
-        [Category("Static Detector")]
-        public float ReactivateThreshold { get; set; }
         [Category("Static Detector")]
         public float StartDelaySeconds { get; set; }
 
@@ -123,6 +179,10 @@ namespace UI
         public bool PostRaceScene { get; set; }
 
         [Category("Layout")]
+        [DisplayName("Show Race Start/GO Graphic (If theme has it)")]
+        public bool ShowRaceStartGraphic { get; set; }
+
+        [Category("Layout")]
         public bool AlwaysShowPosition { get; set; }
 
         [Category("Layout")]
@@ -167,6 +227,13 @@ namespace UI
         [Category("Sound")]
         [NeedsRestart]
         public int[] RemainingSecondsToAnnounce { get; set; }
+
+        [Category("Sound")]
+        public bool ShowSubtitles { get; set; }
+
+        [Category("Sound")]
+        [DisplayName("Subtitle Timeout (seconds)")]
+        public float SubtitleTimeoutSeconds { get; set; }
 
         [Category("Start Rules")]
         public bool TimeTrialStaggeredStart { get; set; }
@@ -234,9 +301,17 @@ namespace UI
         [NeedsRestart]
         public string NotificationURL { get; set; }
 
+        public enum NotificationTypes
+        {
+            Disabled,
+            LegacyMode,
+            ExtensionMode
+        }
+
         [Category("Gate / LED POST notifications")]
         [NeedsRestart]
-        public bool NotificationEnabled { get; set; }
+        [DisplayName("Notifier enabled / mode")]
+        public NotificationTypes Notifier { get; set; }
 
         [Category("Fun Stuff")]
         [NeedsRestart]
@@ -277,10 +352,53 @@ namespace UI
         [NeedsRestart]
         public float PilotProfileMaskAlpha { get; set; }
 
+        [Category("Scripting")]
+        [DisplayName("Lua script timeout (seconds)")]
+        public int LuaScriptTimeoutSeconds { get; set; }
+
+        [Category("QR Pilot Scan")]
+        [DisplayName("Enable QR pilot scan")]
+        public bool QRPilotScan { get; set; }
+
+        [Category("QR Pilot Scan")]
+        [DisplayName("QR scan frequency (seconds, lower = faster detection but higher CPU usage)")]
+        public float QRPilotScanFrequencySeconds { get; set; }
+
+        [Category("QR Pilot Scan")]
+        [DisplayName("QR scan centre crop fraction (0.5 = scan centre 50% of image)")]
+        public float QRPilotScanCentreCropFraction { get; set; }
+
+        [Category("Training")]
+        [DisplayName("Pilot check interval (seconds)")]
+        [PlatformFeature(PlatformFeature.Training)]
+        public int TrainingPilotCheckIntervalSeconds { get; set; }
+
+        [Category("Training")]
+        [DisplayName("Race start delay after first pilot detected (seconds)")]
+        [PlatformFeature(PlatformFeature.Training)]
+        public int TrainingRaceStartDelaySeconds { get; set; }
+
+        [Category("Training")]
+        [DisplayName("Sustained motion required to detect pilot (seconds)")]
+        [PlatformFeature(PlatformFeature.Training)]
+        public int TrainingMotionDetectSeconds { get; set; }
+
+        [Category("Training")]
+        [DisplayName("Sustained static required to end race (seconds)")]
+        [PlatformFeature(PlatformFeature.Training)]
+        public int TrainingStaticDetectSeconds { get; set; }
+        [Category("Training")]
+        [DisplayName("Cooldown after race ends before new race can begin (seconds)")]
+        [PlatformFeature(PlatformFeature.Training)]
+        public int TrainingRaceCooldownSeconds { get; set; }
+
+        [Category("Training")]
+        [DisplayName("Minimum race length before race can end (seconds)")]
+        [PlatformFeature(PlatformFeature.Training)]
+        public int TrainingMinRaceLengthSeconds { get; set; }
+
         public ApplicationProfileSettings()
         {
-            Theme = "FPVTrackside";
-
             AlignChannels = RectangleAlignment.Center;
 
             ReOrderDelaySeconds = 3;
@@ -291,6 +409,9 @@ namespace UI
             PilotOrderPostRace = OrderTypes.PositionAndPB;
 
             TextToSpeechVolume = 100;
+            SubtitleTimeoutSeconds = 5;
+            ShowSubtitles = false;
+            ShowRaceStartGraphic = true;
 
             ChannelGrid1 = true;
             ChannelGrid2 = true;
@@ -338,29 +459,40 @@ namespace UI
 
             InverseResolutionScalePercent = 100;
             AutoSync = true;
-            SponsoredByMessages = true;
+            LuaScriptTimeoutSeconds = 10;
 
             FrameRateLimit = 60;
             VSync = true;
+            AntiAliasing = false;
 
             VideosToKeep = 50;
             HTTPServer = false;
 
-            EventStorageLocation = @"events";
+            EventStorageLocationRelative = @"events";
 
             VideoStaticDetector = true;
-            CrashThreshold = 4;
-            ReactivateThreshold = 20;
             StartDelaySeconds = 5;
             ShowWelcomeScreen = true;
 
             ShownDecimalPlaces = 2;
+            ExportDecimalPlaces = 3;
             UseDirectX9 = false;
+            TextRenderer = TextRendererBackend.WPF;
             ShowPositionDeltaTime = 6;
             Language = "English";
             ShowDownPilotLapTimes = true;
             PilotProfileMask = true;
             PilotProfileMaskAlpha = 0.6f;
+            QRPilotScan = false;
+            QRPilotScanFrequencySeconds = 0.1f;
+            QRPilotScanCentreCropFraction = 0.5f;
+
+            TrainingPilotCheckIntervalSeconds = 1;
+            TrainingRaceStartDelaySeconds = 5;
+            TrainingMotionDetectSeconds = 3;
+            TrainingStaticDetectSeconds = 2;
+            TrainingRaceCooldownSeconds = 30;
+            TrainingMinRaceLengthSeconds = 30;
         }
 
         protected const string filename = "ProfileSettings.xml";
@@ -371,25 +503,42 @@ namespace UI
             ProfileInstance = profile;
         }
 
+        protected virtual int ApplyMigrations(int version)
+        {
+            if (version < 276) { AntiAliasing = false; version = 276; }
+            return version;
+        }
+
+        protected void Migrate()
+        {
+            int newVersion = ApplyMigrations(SettingsVersion);
+            if (newVersion != SettingsVersion)
+                SettingsVersion = newVersion;
+        }
+
         public static ApplicationProfileSettings Read(Profile profile)
         {
-            ApplicationProfileSettings s = null;
             try
             {
-                s = Tools.IOTools.Read<ApplicationProfileSettings>(profile, filename).FirstOrDefault();
+                ApplicationProfileSettings s = Tools.IOTools.Read<ApplicationProfileSettings>(profile, filename).FirstOrDefault();
                 if (s == null)
                 {
                     s = new ApplicationProfileSettings();
                 }
+                else
+                {
+                    s.Migrate();
+                }
+
+                Write(profile, s);
+
+                return s;
             }
-            catch
+            catch (Exception ex)
             {
-                s = new ApplicationProfileSettings();
+                Logger.UI.LogException(typeof(ApplicationProfileSettings), ex);
+                return new ApplicationProfileSettings();
             }
-
-            Write(profile, s);
-
-            return s;
         }
 
         public static void Write()

@@ -103,8 +103,8 @@ namespace WindowsPlatform
             DrawingVisual tempDrawingVisual = new DrawingVisual();
 
 
-            System.Windows.FontWeight fw = /*style.Bold ? System.Windows.FontWeights.Bold : */System.Windows.FontWeights.Medium;
-            System.Windows.FontStyle fs = /*style.Italic ? System.Windows.FontStyles.Italic : */System.Windows.FontStyles.Normal;
+            System.Windows.FontWeight fw = style.Bold ? System.Windows.FontWeights.Bold : System.Windows.FontWeights.Medium;
+            System.Windows.FontStyle fs = style.Italic ? System.Windows.FontStyles.Italic : System.Windows.FontStyles.Normal;
 
             FontFamily ff = new FontFamily(style.Font);
             Typeface tf = new Typeface(ff, fs, fw, System.Windows.FontStretches.Normal);
@@ -162,7 +162,16 @@ namespace WindowsPlatform
 
             drawingContext.DrawText(formattedText, new System.Windows.Point(0, 0));
 
-            newTextSize = new Size((int)Math.Ceiling(formattedText.Width), (int)Math.Ceiling(formattedText.Height));
+            // FormattedText.Width is the logical advance width, not the visual ink bounds.
+            // Italic glyphs slant past their advance box on the right, so for italic text
+            // the geometry's actual bounds can be wider - use whichever is larger.
+            double measuredWidth = formattedText.Width;
+            if (!textGeometry.IsEmpty())
+            {
+                measuredWidth = Math.Max(measuredWidth, textGeometry.Bounds.Right);
+            }
+
+            newTextSize = new Size((int)Math.Ceiling(measuredWidth), (int)Math.Ceiling(formattedText.Height));
 
             int maxSize = 2000;
             if (newTextSize.Width > maxSize)

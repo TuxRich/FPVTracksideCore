@@ -1,4 +1,4 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -14,20 +14,42 @@ namespace Tools
     {
         public static DirectoryInfo WorkingDirectory { get; set; }
 
-        private static readonly Dictionary<Type, XmlSerializer> xmlSerializerCache = new Dictionary<Type, XmlSerializer>();
-
-        private static XmlSerializer GetXmlSerializer<T>()
+        /// <summary>
+        /// Resolves a relative path to an absolute path based on WorkingDirectory.
+        /// Absolute paths are returned as-is. Falls back to the current directory, as before,
+        /// when WorkingDirectory is not yet set.
+        /// </summary>
+        public static string ResolveFromWorkingDirectory(params string[] pathsToCombine)
         {
-            Type arrayType = typeof(T[]);
-            lock (xmlSerializerCache)
+            string root = WorkingDirectory?.FullName ?? Directory.GetCurrentDirectory();
+
+            if (pathsToCombine == null || pathsToCombine.Length == 0 || pathsToCombine.Any(string.IsNullOrEmpty))
+                return root;
+
+            string path = Path.Combine(pathsToCombine);
+
+            if (Path.IsPathRooted(path))
+                return path;
+
+            try
             {
-                if (!xmlSerializerCache.TryGetValue(arrayType, out XmlSerializer serializer))
-                {
-                    serializer = new XmlSerializer(arrayType);
-                    xmlSerializerCache[arrayType] = serializer;
-                }
-                return serializer;
+                return Path.GetFullPath(Path.Combine(root, path));
             }
+            catch (Exception)
+            {
+                // Not a usable path - a URL, or characters the platform rejects. Hand it back
+                // untouched so callers fail exactly the way they did before.
+                return path;
+            }
+        }
+
+        /// <summary>
+        /// Converts an absolute path to a path relative to WorkingDirectory, for storage.
+        /// </summary>
+        public static string RelativiseToWorkingDirectory(string fullPath)
+        {
+            string root = WorkingDirectory?.FullName ?? Directory.GetCurrentDirectory();
+            return Path.GetRelativePath(root, fullPath);
         }
 
         public static T[] Read<T>(Profile profile, string filename) where T : new()
@@ -123,7 +145,7 @@ namespace Tools
 
                 if (ext == ".xml")
                 {
-                    XmlSerializer serializer = GetXmlSerializer<T>();
+                    XmlSerializer serializer = new XmlSerializer(typeof(T[]));
                     using (TextReader reader = new StringReader(contents))
                     {
                         return (T[])serializer.Deserialize(reader);
@@ -173,7 +195,7 @@ namespace Tools
 
                     if (file.Extension.ToLower() == ".xml")
                     {
-                        XmlSerializer serializer = GetXmlSerializer<T>();
+                        XmlSerializer serializer = new XmlSerializer(typeof(T[]));
                         using (TextWriter writer = new StreamWriter(file.FullName))
                         {
                             serializer.Serialize(writer, items);

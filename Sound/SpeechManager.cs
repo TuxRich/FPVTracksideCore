@@ -41,6 +41,8 @@ namespace Sound
 
         public int Volume { get; set; }
 
+        public event Action<string> OnSpeech;
+
         public SpeechManager(PlatformTools platformTools, string voice, int volume)
         {
             Voice = voice;
@@ -86,6 +88,11 @@ namespace Sound
         public bool HasSpeech()
         {
             return ttsQueue != null;
+        }
+
+        public bool IsSpeaking
+        {
+            get { return ttsQueue?.NeedWorkDone ?? false; }
         }
 
         public void StopSpeech()
@@ -152,11 +159,13 @@ namespace Sound
                 try
                 {
                     string text = SpeechParameters.CreateTextToSpeech(request.RawText, request.Parameters);
+                    string displayText = SpeechParameters.CreateDisplayText(request.RawText, request.Parameters);
                     Logger.SoundLog.Log(this, "TTS", text, Logger.LogType.Notice);
                     if (!Muted)
                     {
                         if (!string.IsNullOrEmpty(text))
                         {
+                            OnSpeech?.Invoke(displayText);
                             speaker.Speak(text);
                         }
                     }

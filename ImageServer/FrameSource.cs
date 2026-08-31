@@ -17,6 +17,19 @@ namespace ImageServer
 
         public event FrameDelegate OnFrameEvent;
 
+        /// <summary>
+        /// Managed-buffer overlay hook: FfmpegFrameSource path.
+        /// Invoked after the BGRA byte[] is filled and before both recording and display.
+        /// </summary>
+        public static Action<FrameSource, byte[]> BeforeFrameDispatch;
+
+        /// <summary>
+        /// Unmanaged-buffer overlay hook: MediaFoundation / DirectShow path.
+        /// Invoked after the device locks the sample buffer (BGRA/BGR32 IntPtr) and before
+        /// the data is copied to RawTexture / passed on to the recorder.
+        /// </summary>
+        public static Action<FrameSource, IntPtr, int> BeforeFrameDispatchPtr;
+
         public enum States
         {
             Stopped,
@@ -38,6 +51,12 @@ namespace ImageServer
         public long FrameProcessNumber { get; set; }
         public long SampleTime { get; set; }
 
+        public float MeasuredFps => (DateTime.UtcNow - lastFrameTime).TotalSeconds < 2.0 ? measuredFps : 0f;
+        private float measuredFps;
+        private DateTime fpsWindowStart = DateTime.MinValue;
+        private DateTime lastFrameTime = DateTime.MinValue;
+        private int fpsWindowCount;
+
         public virtual VideoConfig VideoConfig { get; private set; }
 
         public virtual bool Connected { get; protected set; }
@@ -57,6 +76,11 @@ namespace ImageServer
         }
 
         public Directions Direction { get; protected set; }
+
+        // True when the source has already baked VideoConfig.Flipped/Mirrored into its frames
+        // (e.g. via an ffmpeg vflip/hflip filter). Consumers must not apply those flips again
+        // at render/save time, otherwise the two cancel and the toggles appear to do nothing.
+        public virtual bool AppliesUserFlipMirror => false;
 
         public FrameSource(VideoConfig videoConfig)
         {
@@ -107,6 +131,19 @@ namespace ImageServer
 
         public void OnFrame(long sampleTime, long processNumber)
         {
+            var now = DateTime.UtcNow;
+            lastFrameTime = now;
+            if (fpsWindowStart == DateTime.MinValue)
+                fpsWindowStart = now;
+            fpsWindowCount++;
+            double elapsed = (now - fpsWindowStart).TotalSeconds;
+            if (elapsed >= 1.0)
+            {
+                measuredFps = (float)(fpsWindowCount / elapsed);
+                fpsWindowStart = now;
+                fpsWindowCount = 0;
+            }
+
             OnFrameEvent?.Invoke(sampleTime, processNumber);
         }
     }

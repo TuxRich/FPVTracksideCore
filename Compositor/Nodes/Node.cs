@@ -110,7 +110,7 @@ namespace Composition.Nodes
             }
         }
 
-        public bool HasFocus
+        public virtual bool HasFocus
         {
             get
             {
@@ -658,12 +658,12 @@ namespace Composition.Nodes
             return false;
         }
 
-        public virtual bool IsAnimatingInvisiblity()
+        public virtual bool IsAnimatingInvisibility()
         {
             Node parent = Parent;
             if (parent != null)
             {
-                return parent.IsAnimatingInvisiblity();
+                return parent.IsAnimatingInvisibility();
             }
 
             return false;
@@ -757,6 +757,24 @@ namespace Composition.Nodes
                 }
 
                 y += height;
+            }
+        }
+
+        public static void AlignLines(float lineHeight, params Node[] nodes)
+        {
+            AlignLines(lineHeight, 0, nodes);
+        }
+
+        public static void AlignLines(float lineHeight, float padding, params Node[] nodes)
+        {
+            float y = 0;
+            foreach (Node n in nodes)
+            {
+                if (n != null)
+                {
+                    n.RelativeBounds = new RectangleF(n.RelativeBounds.X, y, n.RelativeBounds.Width, lineHeight);
+                }
+                y += lineHeight + padding;
             }
         }
 

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Tools;
 
 namespace DB.JSON
 {
@@ -22,6 +23,7 @@ namespace DB.JSON
         
         public JsonCollection<Pilot> Pilots { get; private set; }
         public JsonCollection<Patreon> Patreons { get; private set; }
+        public JsonCollection<Sponsor> Sponsors { get; private set; }
         public JsonCollection<Club> Clubs { get; private set; }
         public ChannelCollection Channels { get; private set; }
 
@@ -41,10 +43,11 @@ namespace DB.JSON
             DataDirectory = dataDirectory;
             Events = new EventCollection(DataDirectory);
             Patreons = new JsonCollection<Patreon>(DataDirectory);
+            Sponsors = new JsonCollection<Sponsor>(DataDirectory);
             Clubs = new JsonCollection<Club>(DataDirectory);
             Channels = new ChannelCollection();
 
-            DirectoryInfo trackDir = new DirectoryInfo("Tracks");
+            DirectoryInfo trackDir = new DirectoryInfo(IOTools.ResolveFromWorkingDirectory("Tracks"));
             if (!trackDir.Exists)
             {
                 trackDir.Create();
@@ -89,6 +92,9 @@ namespace DB.JSON
         {
             if (typeof(T) == typeof(RaceLib.Patreon))
                 return new ConvertedCollection<RaceLib.Patreon, Patreon>(Patreons, null) as IDatabaseCollection<T>;
+            
+            if (typeof(T) == typeof(RaceLib.Sponsor))
+                return new ConvertedCollection<RaceLib.Sponsor, Sponsor>(Sponsors, null) as IDatabaseCollection<T>;
 
             if (typeof(T) == typeof(RaceLib.Event))
                 return new ConvertedCollection<RaceLib.Event, Event>(Events, this) as IDatabaseCollection<T>;
@@ -120,7 +126,7 @@ namespace DB.JSON
             if (typeof(T) == typeof(RaceLib.Track))
                 return new ConvertedCollection<RaceLib.Track, Track>(Tracks, this) as IDatabaseCollection<T>;
 
-            if (typeof(T) == typeof(RaceLib.PilotChannel))
+            if (typeof(RaceLib.PilotChannel).IsAssignableFrom(typeof(T)))
                 return new DummyCollection<T>();
 
             if (typeof(T) == typeof(RaceLib.Lap))

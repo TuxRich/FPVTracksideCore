@@ -1,4 +1,5 @@
 ﻿using Microsoft.Xna.Framework;
+using Newtonsoft.Json;
 using RaceLib.Format;
 using RaceLib.Game;
 using System;
@@ -16,14 +17,27 @@ namespace RaceLib
 {
     public class EventManager : IDisposable
     {
-        public RaceManager RaceManager { get; private set; }
+        public RaceManager RaceManager { get; protected set; }
 
         public Channel[] Channels { get { return Event.Channels; } }
 
         private Dictionary<Channel, Microsoft.Xna.Framework.Color> channelColour;
 
         private Event eventObj;
-        public Event Event { get { return eventObj; } set { eventObj = value; OnEventChange?.Invoke(); } }
+        public Event Event
+        {
+            get { return eventObj; }
+            set
+            {
+                eventObj = value;
+                OnEventChange?.Invoke();
+
+                if (value != null)
+                {
+                    RaceManager.TimingSystemManager.SetEventMetaData(new EventMetaData(value.Name));
+                }
+            }
+        }
         
         public Guid EventId { get; private set; }
 
@@ -55,13 +69,7 @@ namespace RaceLib
         public EventManager(Profile profile)
         {
             Profile = profile;
-            RaceManager = new RaceManager(this);
-            LapRecordManager = new LapRecordManager(RaceManager);
-            ResultManager = new ResultManager(this);
-            TimedActionManager = new TimedActionManager();
-            RoundManager = new RoundManager(this);
-            SpeedRecordManager = new SpeedRecordManager(RaceManager);
-            GameManager = new GameManager(this);
+            Init();
 
             RaceStringFormatter = new RaceStringFormatter(this);
 
@@ -70,7 +78,17 @@ namespace RaceLib
             channelColour = new Dictionary<Channel, Microsoft.Xna.Framework.Color>();
 
             RaceManager.TimingSystemManager.Connect();
+        }
 
+        public virtual void Init()
+        {
+            RaceManager = new RaceManager(this);
+            LapRecordManager = new LapRecordManager(RaceManager);
+            ResultManager = new ResultManager(this);
+            TimedActionManager = new TimedActionManager();
+            RoundManager = new RoundManager(this);
+            SpeedRecordManager = new SpeedRecordManager(RaceManager);
+            GameManager = new GameManager(this);
         }
 
         public void Dispose()
@@ -259,7 +277,7 @@ namespace RaceLib
             OnEventChange?.Invoke();
         }
 
-        public void LoadEvent(WorkSet workSet, WorkQueue workQueue, Guid eventId)
+        public virtual void LoadEvent(WorkSet workSet, WorkQueue workQueue, Guid eventId)
         {
             EventId = eventId;
             ProfilePictures = new ProfilePictures(EventId);
@@ -300,6 +318,8 @@ namespace RaceLib
                     }
                 }
             });
+
+            
 
             workQueue.Enqueue(workSet, "Loading Game Types", () =>
             {
@@ -366,7 +386,7 @@ namespace RaceLib
             }
         }
 
-        public void UnloadRaces(WorkSet workSet, WorkQueue workQueue)
+        public virtual void UnloadRaces(WorkSet workSet, WorkQueue workQueue)
         {
             workQueue.Enqueue(workSet, "Unloading Races", () =>
             {
@@ -376,8 +396,7 @@ namespace RaceLib
 
             workQueue.Enqueue(workSet, "Unloading Results", () =>
             {
-                // Load points
-                ResultManager.Clear();
+                ResultManager.Unload();
             });
 
             workQueue.Enqueue(workSet, "Unloading Records", () =>
@@ -392,7 +411,7 @@ namespace RaceLib
             });
         }
 
-        public void LoadRaces(WorkSet workSet, WorkQueue workQueue)
+        public virtual void LoadRaces(WorkSet workSet, WorkQueue workQueue)
         {
             workQueue.Enqueue(workSet, "Loading Races", () =>
             {
@@ -535,15 +554,35 @@ namespace RaceLib
 
         public void RedistrubuteChannels()
         {
-            var channelLanes = Channels.GetChannelGroups().ToArray();
+            var channelGroups = Channels.GetChannelGroups().ToArray();
 
-            int counter = 0;
-            foreach (var p in Event.PilotChannels.OrderBy(p => p.Pilot.Name))
+            var pilotsByBandType = Event.PilotChannels
+                .OrderBy(p => p.Pilot.Name)
+                .GroupBy(p => p.Channel.Band.GetBandType());
+
+            foreach (var bandGroup in pilotsByBandType)
             {
-                Channel c = channelLanes[counter % channelLanes.Length].First();
+                var compatibleChannels = channelGroups
+                    .Select(g => g.FirstOrDefault(c => c.Band.GetBandType() == bandGroup.Key))
+                    .Where(c => c != null)
+                    .ToArray();
 
-                SetPilotChannel(p.Pilot, c);
-                counter++;
+                if (!compatibleChannels.Any())
+                    continue;
+
+                int counter = 0;
+                foreach (var p in bandGroup)
+                {
+                    try
+                    {
+                        SetPilotChannel(p.Pilot, compatibleChannels[counter % compatibleChannels.Length]);
+                    }
+                    catch (Exception e)
+                    {
+                        Logger.Generation.LogException(this, e);
+                    }
+                    counter++;
+                }
             }
         }
 
@@ -595,7 +634,6 @@ namespace RaceLib
             return ExportColumns.Any(ec => ec.Enabled && ec.Type == type);
         }
 
-
         public IEnumerable<Tuple<Pilot, Channel>> GetPilotsFromLines(IEnumerable<string> pilots, bool assignChannel)
         {
             int channelIndex = 0;
@@ -606,7 +644,7 @@ namespace RaceLib
             {
                 string pilotname = untrimmed;
 
-                string[] csv = pilotname.Split(',');    
+                string[] csv = pilotname.Split(',');
                 if (csv.Length > 0)
                 {
                     pilotname = csv[0];
@@ -651,12 +689,12 @@ namespace RaceLib
             }
         }
 
-        public string[][] GetResultsText(Units units)
+        public string[][] GetResultsText(Units units, int decimalPlaces)
         {
             Race currentRace = RaceManager.CurrentRace;
             if (currentRace != null)
             {
-                return ResultManager.GetResultsText(currentRace, units);
+                return ResultManager.GetResultsText(currentRace, units, decimalPlaces);
             }
 
             return new string[0][];
@@ -759,6 +797,35 @@ namespace RaceLib
             {
                 OnPilotRefresh?.Invoke();
             }
+        }
+
+        public event System.Action<Race, Lap> OnJumpToReplay;
+        public event System.Action<Race, Lap> OnJumpToReplaySecondWindow;
+
+        public virtual bool HasReplay(Race race)
+        {
+            return false;
+        }
+
+        public void JumpToReplay(Race race, Lap lap = null)
+        {
+            OnJumpToReplay?.Invoke(race, lap);
+        }
+
+        public void JumpToReplaySecondWindow(Race race, Lap lap = null)
+        {
+            OnJumpToReplaySecondWindow?.Invoke(race, lap);
+        }
+
+        public virtual IEnumerable<EventTypes> GetEventTypes()
+        {
+            yield return EventTypes.Practice;
+            yield return EventTypes.TimeTrial;
+            yield return EventTypes.Race;
+            yield return EventTypes.Endurance;
+            yield return EventTypes.Freestyle;
+            yield return EventTypes.CasualPractice;
+            yield return EventTypes.Game;
         }
     }
 }

@@ -732,10 +732,41 @@ namespace UI.Nodes
             }
         }
 
-        private void FullScreen(ChannelNodeBase fullScreen)
+        // Each pilot node's crash state and visibility from before the grid went fullscreen, so
+        // leaving fullscreen can put them back as they were.
+        private Dictionary<ChannelNodeBase, Tuple<CrashState, bool>> preFullScreen = new Dictionary<ChannelNodeBase, Tuple<CrashState, bool>>();
+
+        public bool IsFullScreen
+        {
+            get
+            {
+                return ChannelNodes.Any(cn => cn.Pilot != null && cn.CrashedOutType == CrashState.FullScreen);
+            }
+        }
+
+        public bool IsFullScreenOn(ChannelNodeBase node)
+        {
+            return node != null && node.CrashedOutType != CrashState.FullScreen && IsFullScreen;
+        }
+
+        public ChannelNodeBase GetPilotNode(IEnumerable<Channel> channels)
+        {
+            return ChannelNodes.FirstOrDefault(cn => cn.Pilot != null && channels.Contains(cn.Channel));
+        }
+
+        public void FullScreen(ChannelNodeBase fullScreen)
         {
             if (EventManager.RaceManager.RaceRunning || Replay)
             {
+                if (!IsFullScreen)
+                {
+                    preFullScreen.Clear();
+                    foreach (ChannelNodeBase cn in ChannelNodes.Where(cn => cn.Pilot != null))
+                    {
+                        preFullScreen[cn] = Tuple.Create(cn.CrashedOutType, cn.Visible);
+                    }
+                }
+
                 IEnumerable<ChannelNodeBase> pilotNodes = ChannelNodes.Where(cn => cn.Pilot != null && cn != fullScreen);
                 if (pilotNodes.Any())
                 {
@@ -1011,20 +1042,65 @@ namespace UI.Nodes
             }
         }
 
+        public void ExitFullScreen()
+        {
+            if (!IsFullScreen)
+                return;
+
+            foreach (ChannelNodeBase cn in ChannelNodes.Where(cn => cn.Pilot != null))
+            {
+                Tuple<CrashState, bool> before;
+                if (!preFullScreen.TryGetValue(cn, out before))
+                {
+                    before = Tuple.Create(CrashState.AutoUp, true);
+                }
+
+                if (cn.CrashedOutType == CrashState.FullScreen)
+                {
+                    // Hidden by the fullscreen without the race being told, so restore quietly.
+                    cn.RestoreCrashedOutType(before.Item1);
+                }
+                else if (cn.CrashedOutType != before.Item1)
+                {
+                    // The fullscreened pilot. Going fullscreen recovered them, so undo that properly.
+                    cn.SetCrashedOutType(before.Item1);
+                }
+
+                if (Replay)
+                {
+                    // The replay grid doesn't drive visibility from crash state; put back what was shown.
+                    cn.SetAnimatedVisibility(before.Item2);
+                }
+            }
+
+            preFullScreen.Clear();
+            Reorder(true);
+            RequestLayout();
+        }
+
+        // The "Toggle View Channel Group" shortcuts: crash a pilot out / bring them back, the same
+        // as the Crashed Out menu item. This must never go through ChannelNodeBase.Close(), which is
+        // the close button and removes the pilot from the race when it hasn't started.
         public void ToggleCrashedOut(IEnumerable<Channel> channels)
         {
+            if (!EventManager.RaceManager.RaceRunning)
+                return;
+
+            // Work on the normal grid, not on one hidden behind a fullscreen pilot.
+            ExitFullScreen();
+
             foreach (ChannelNodeBase channelNode in ChannelNodes)
             {
-                if (channels.Contains(channelNode.Channel))
+                if (channelNode.Pilot == null || !channels.Contains(channelNode.Channel) || !channelNode.AllowCrashedOut)
+                    continue;
+
+                if (channelNode.CrashedOut)
                 {
-                    if (channelNode.Visible)
-                    {
-                        channelNode.Close();
-                    }
-                    else
-                    {
-                        channelNode.SetCrashedOutType(CrashState.ManualUp);
-                    }
+                    channelNode.SetCrashedOutType(CrashState.ManualUp);
+                }
+                else
+                {
+                    channelNode.SetCrashedOutType(CrashState.ManualDown);
                 }
             }
 

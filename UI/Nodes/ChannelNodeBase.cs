@@ -282,6 +282,13 @@ namespace UI.Nodes
                 velocidroneGateContainer.Visible = false;
         }
 
+        // Puts back a state saved before a fullscreen. Entering fullscreen changed this node's
+        // state without telling the race, so returning to it mustn't tell the race either.
+        public void RestoreCrashedOutType(CrashState type)
+        {
+            CrashedOutType = type;
+        }
+
         public void SetCrashedOutType(CrashState type)
         {
             if (CrashedOutType == type)

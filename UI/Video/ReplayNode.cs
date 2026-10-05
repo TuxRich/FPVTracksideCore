@@ -377,6 +377,61 @@ namespace UI.Video
             ShowAll();
         }
 
+        // "Toggle View Channel Group" shortcut: hide or show that pilot's feed in the replay.
+        public void ToggleChannelVisible(IEnumerable<Channel> channels)
+        {
+            if (ChannelsGridNode == null)
+                return;
+
+            ExitFullScreen();
+
+            ChannelNodeBase cbn = ChannelsGridNode.GetPilotNode(channels);
+            if (cbn == null)
+                return;
+
+            if (cbn.Visible)
+            {
+                Hide(cbn);
+            }
+            else
+            {
+                cbn.Visible = true;
+                SeekNode.ShowAll.Visible = ChannelsGridNode.ChannelNodes.Any(cn => cn.Pilot != null && !cn.Visible);
+                ChannelsGridNode.Reorder(true);
+            }
+        }
+
+        // "Fullscreen Channel Group" shortcut.
+        public void ToggleFullScreen(IEnumerable<Channel> channels)
+        {
+            if (ChannelsGridNode == null)
+                return;
+
+            ChannelNodeBase cbn = ChannelsGridNode.GetPilotNode(channels);
+            if (cbn == null)
+                return;
+
+            if (ChannelsGridNode.IsFullScreenOn(cbn))
+            {
+                ExitFullScreen();
+            }
+            else
+            {
+                ChannelsGridNode.FullScreen(cbn);
+                FullScreen(cbn);
+            }
+        }
+
+        private void ExitFullScreen()
+        {
+            if (!ChannelsGridNode.IsFullScreen)
+                return;
+
+            ChannelsGridNode.ExitFullScreen();
+            SeekNode.SetPilotFilter(null);
+            SeekNode.ShowAll.Visible = ChannelsGridNode.ChannelNodes.Any(cn => cn.Pilot != null && !cn.Visible);
+        }
+
         private void ShowAll()
         {
             SeekNode.ShowAll.Visible = false;

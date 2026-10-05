@@ -49,6 +49,8 @@ namespace UI.Nodes
         private Node fullscreenNode;
         private Node fullscreenNodeParent;
 
+        public Node FullScreenNode { get { return fullscreenNode; } }
+
         public enum Scenes
         {
             Clear,

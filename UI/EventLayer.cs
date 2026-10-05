@@ -1442,6 +1442,44 @@ namespace UI
                 }
 
 
+                int channelGroup = 0;
+                foreach (ShortcutKey shortcut in KeyMapper.ToggleView)
+                {
+                    if (shortcut.Match(inputEvent))
+                    {
+                        Channel[] channels = EventManager.GetChannelGroup(channelGroup).ToArray();
+                        if (TabbedMultiNode.IsOnReplay)
+                        {
+                            TabbedMultiNode.ReplayNode.ToggleChannelVisible(channels);
+                        }
+                        else
+                        {
+                            ChannelsGridNode.ToggleCrashedOut(channels);
+                        }
+                        return true;
+                    }
+                    channelGroup++;
+                }
+
+                channelGroup = 0;
+                foreach (ShortcutKey shortcut in KeyMapper.FullScreenView)
+                {
+                    if (shortcut.Match(inputEvent))
+                    {
+                        Channel[] channels = EventManager.GetChannelGroup(channelGroup).ToArray();
+                        if (TabbedMultiNode.IsOnReplay)
+                        {
+                            TabbedMultiNode.ReplayNode.ToggleFullScreen(channels);
+                        }
+                        else
+                        {
+                            ToggleFullScreen(channels);
+                        }
+                        return true;
+                    }
+                    channelGroup++;
+                }
+
                 switch (inputEvent.Key)
                 {
                     case Keys.V:
@@ -1466,19 +1504,30 @@ namespace UI
                         return true;
                 }
 
-                int i = 0;
-                foreach (ShortcutKey shortcut in KeyMapper.ToggleView)
-                {
-                    if (shortcut.Match(inputEvent))
-                    {
-                        Channel[] channel = EventManager.GetChannelGroup(i).ToArray();
-                        ChannelsGridNode.ToggleCrashedOut(channel);
-                    }
-                    i++;
-                }
 
             }
             return false;
+        }
+
+        private void ToggleFullScreen(Channel[] channels)
+        {
+            ChannelNodeBase node = ChannelsGridNode.GetPilotNode(channels);
+            if (node == null)
+                return;
+
+            // With no race running, fullscreen is a scene of its own; mid-race it's done within the grid.
+            if (sceneManagerNode.FullScreenNode == node)
+            {
+                sceneManagerNode.UnFullScreen();
+            }
+            else if (ChannelsGridNode.IsFullScreenOn(node))
+            {
+                ChannelsGridNode.ExitFullScreen();
+            }
+            else
+            {
+                ChannelsGridNode.FullScreen(node);
+            }
         }
 
         private void StartStopNext()

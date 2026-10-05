@@ -146,6 +146,40 @@ namespace Composition.Input
         [Category("FPV View")]
         public ShortcutKey ToggleViewChannelGroup8 { get; set; }
 
+        // Unbound by default. Toggles fullscreen for the pilot on that channel group, live or in replay.
+        [Category("FPV View")]
+        public ShortcutKey FullScreenChannelGroup1 { get; set; }
+        [Category("FPV View")]
+        public ShortcutKey FullScreenChannelGroup2 { get; set; }
+        [Category("FPV View")]
+        public ShortcutKey FullScreenChannelGroup3 { get; set; }
+        [Category("FPV View")]
+        public ShortcutKey FullScreenChannelGroup4 { get; set; }
+        [Category("FPV View")]
+        public ShortcutKey FullScreenChannelGroup5 { get; set; }
+        [Category("FPV View")]
+        public ShortcutKey FullScreenChannelGroup6 { get; set; }
+        [Category("FPV View")]
+        public ShortcutKey FullScreenChannelGroup7 { get; set; }
+        [Category("FPV View")]
+        public ShortcutKey FullScreenChannelGroup8 { get; set; }
+
+        [Browsable(false)]
+        public IEnumerable<ShortcutKey> FullScreenView
+        {
+            get
+            {
+                yield return FullScreenChannelGroup1;
+                yield return FullScreenChannelGroup2;
+                yield return FullScreenChannelGroup3;
+                yield return FullScreenChannelGroup4;
+                yield return FullScreenChannelGroup5;
+                yield return FullScreenChannelGroup6;
+                yield return FullScreenChannelGroup7;
+                yield return FullScreenChannelGroup8;
+            }
+        }
+
         [Browsable(false)]
         public IEnumerable<ShortcutKey> ToggleView
         {
@@ -371,6 +405,10 @@ namespace Composition.Input
     {
         public static bool Match(this ShortcutKey key, KeyboardInputEvent keyboardInputEvent)
         {
+            // An unbound shortcut (never set, or cleared in the editor) is null and matches nothing.
+            if (key == null)
+                return false;
+
             return key.Match(keyboardInputEvent.Key, keyboardInputEvent.Ctrl, keyboardInputEvent.Alt, keyboardInputEvent.Shift);
         }
     }

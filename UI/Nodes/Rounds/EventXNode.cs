@@ -45,6 +45,7 @@ namespace UI.Nodes.Rounds
         public event RoundDelegate PackCount;
         public event RoundTimeDelegate Times;
         public event RoundDelegate LapCounts;
+        public event RoundDelegate PasteResults;
 
         public event RoundStageDelegate AddEmptyRound;
         public event RoundStageDelegate CustomRound;
@@ -232,6 +233,9 @@ namespace UI.Nodes.Rounds
                     results.AddItem("Lap Count Stage", () => { LapCounts?.Invoke(Round); });
                 
                 results.AddItem("Pack Count Stage", () => { PackCount?.Invoke(Round); });
+
+                results.AddBlank();
+                results.AddItem("Paste Results...", () => { PasteResults?.Invoke(Round); });
             }
         }
 

@@ -368,8 +368,10 @@ namespace RaceLib
             {
                 RoundPlan roundPlan = new RoundPlan(EventManager, callingRound, null, orderedPilots.ToArray());
 
-                // If we're filling the current round that's empty
-                if (EventManager.RoundManager.IsEmpty(callingRound))
+                // If we're filling the current round that's empty. Not if it's holding pasted results, they never
+                // have races, so moving the round into this stage would lose them.
+                bool holdsPastedResults = callingRound.Stage != null && callingRound.Stage.PastedResults != null;
+                if (EventManager.RoundManager.IsEmpty(callingRound) && !holdsPastedResults)
                 {
                     using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
                     {
@@ -588,6 +590,11 @@ namespace RaceLib
 
         public IEnumerable<Pilot> GetOutputPilots(Round round)
         {
+            if (round.Stage != null && round.Stage.PastedResults != null)
+            {
+                return GetPastedResultPilots(round.Stage).Select(t => t.Item2);
+            }
+
             RoundFormat roundFormat;
             if (round.Stage != null)
             {
@@ -786,9 +793,17 @@ namespace RaceLib
 
         public void DeleteStage(Stage stage)
         {
+            // Rounds just holding pasted results go with them. They aren't numbered, so removing them doesn't renumber any others.
+            Round[] pastedResultsRounds = stage == null ? new Round[0] : GetStageRounds(stage).Where(IsPastedResultsRound).ToArray();
+
             using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
             {
                 DeleteStage(db, stage);
+
+                foreach (Round round in pastedResultsRounds)
+                {
+                    RemoveRound(db, round);
+                }
             }
         }
 
@@ -932,6 +947,7 @@ namespace RaceLib
                 round.Stage.TimeSummary = null;
                 round.Stage.LapCountAfterRound = false;
                 round.Stage.PackCountAfterRound = false;
+                round.Stage.PastedResults = null;
                 db.Update(round.Stage);
             }
         }
@@ -947,6 +963,7 @@ namespace RaceLib
                 round.Stage.TimeSummary = new TimeSummary() { TimeSummaryType = type };
                 round.Stage.LapCountAfterRound = false;
                 round.Stage.PackCountAfterRound = false;
+                round.Stage.PastedResults = null;
                 db.Update(round.Stage);
             }
         }
@@ -962,6 +979,7 @@ namespace RaceLib
                 round.Stage.TimeSummary = null;
                 round.Stage.LapCountAfterRound = true;
                 round.Stage.PackCountAfterRound = false;
+                round.Stage.PastedResults = null;
                 db.Update(round.Stage);
             }
         }
@@ -977,6 +995,7 @@ namespace RaceLib
                 round.Stage.TimeSummary = null;
                 round.Stage.LapCountAfterRound = false;
                 round.Stage.PackCountAfterRound = true;
+                round.Stage.PastedResults = null;
                 db.Update(round.Stage);
             }
         }
@@ -984,6 +1003,143 @@ namespace RaceLib
         public IEnumerable<Stage> GetStages()
         {
             return Rounds.Select(x => x.Stage).Where(s => s != null && s.Valid).Distinct();
+        }
+
+        // Adds a results stage holding results pasted from elsewhere (eg another event) to seed from.
+        // If the calling round already holds pasted results, they're replaced.
+        public Round SetPastedResults(Round callingRound, string name, StandingsResult pasted, PastedResultsSettings settings, bool addMissingPilots)
+        {
+            Round[] sheetRounds = Rounds.Where(r => r.Stage != null && r.Stage.HasSheetFormat).ToArray();
+            int[] sheetRoundNumbers = sheetRounds.Select(r => r.RoundNumber).ToArray();
+
+            Round round = callingRound;
+            Stage stage = callingRound.Stage;
+
+            if (stage == null || stage.PastedResults == null)
+            {
+                // Pasted results don't come from any races, so they replace an empty round (eg a new event's Round 1),
+                // or get a new one if there isn't one.
+                Round after = stage != null ? GetLastStageRound(stage) ?? callingRound : callingRound;
+                round = GetEmptyRound(callingRound, after) ?? CreateEmptyRound(callingRound.EventType, null, after);
+                stage = null;
+            }
+
+            if (addMissingPilots)
+            {
+                AddMissingPastedResultPilots(pasted, settings);
+            }
+
+            // Remember who's who, so renaming a pilot later doesn't lose them.
+            foreach (StandingsRow row in pasted.Rows)
+            {
+                Pilot pilot = FindPastedResultPilot(row);
+                if (pilot != null)
+                {
+                    row.PilotId = pilot.ID;
+                }
+            }
+
+            using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+            {
+                if (stage == null)
+                {
+                    stage = CreateStage(db, round, false);
+                }
+
+                stage.Name = name;
+                stage.PointSummary = null;
+                stage.TimeSummary = null;
+                stage.LapCountAfterRound = false;
+                stage.PackCountAfterRound = false;
+                stage.PastedResults = settings;
+                stage.Standings = pasted;
+                db.Update(stage);
+            }
+
+            // The round holding the results no longer takes a round number.
+            RaceManager.UpdateRaceRoundNumbers();
+
+            // Spreadsheet formats find their rounds by number, so reload them if that moved their rounds.
+            if (!sheetRounds.Select(r => r.RoundNumber).SequenceEqual(sheetRoundNumbers))
+            {
+                SheetFormatManager.Clear();
+                SheetFormatManager.Load();
+            }
+
+            OnStageChanged?.Invoke();
+            return round;
+        }
+
+        // The calling round if it's unused, otherwise the next unused round after it.
+        private Round GetEmptyRound(Round callingRound, Round after)
+        {
+            if (callingRound.Stage == null && IsEmpty(callingRound))
+                return callingRound;
+
+            return Rounds.Where(r => r.Valid && r.Stage == null && r.Order > after.Order && IsEmpty(r)).OrderBy(r => r.Order).FirstOrDefault();
+        }
+
+        // A round with no races that's just holding pasted results. It isn't shown or numbered, the results take its place.
+        public bool IsPastedResultsRound(Round round)
+        {
+            return round.Stage != null && round.Stage.PastedResults != null && IsEmpty(round);
+        }
+
+        // The event pilots within the stage's pasted results range, with their pasted position, in finishing order.
+        public IEnumerable<Tuple<int, Pilot>> GetPastedResultPilots(Stage stage)
+        {
+            if (stage == null || stage.PastedResults == null || stage.Standings == null || stage.Standings.Rows == null)
+                yield break;
+
+            int position = 0;
+            foreach (StandingsRow row in stage.Standings.Rows)
+            {
+                position++;
+                if (!stage.PastedResults.Contains(position))
+                    continue;
+
+                Pilot pilot = FindPastedResultPilot(row);
+                if (pilot != null)
+                {
+                    yield return new Tuple<int, Pilot>(position, pilot);
+                }
+            }
+        }
+
+        public Pilot FindPastedResultPilot(StandingsRow row)
+        {
+            Pilot[] pilots = Event.Pilots.Where(p => p != null).ToArray();
+
+            Pilot pilot = null;
+            if (row.PilotId != null)
+            {
+                pilot = pilots.FirstOrDefault(p => p.ID == row.PilotId.Value);
+            }
+
+            if (pilot == null && !string.IsNullOrWhiteSpace(row.Name))
+            {
+                string name = row.Name.Trim();
+                pilot = pilots.FirstOrDefault(p => p.Name != null && string.Equals(p.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return pilot;
+        }
+
+        private void AddMissingPastedResultPilots(StandingsResult pasted, PastedResultsSettings settings)
+        {
+            int position = 0;
+            foreach (StandingsRow row in pasted.Rows)
+            {
+                position++;
+                if (!settings.Contains(position) || string.IsNullOrWhiteSpace(row.Name))
+                    continue;
+
+                if (FindPastedResultPilot(row) == null)
+                {
+                    Pilot pilot = EventManager.GetCreatePilot(row.Name.Trim());
+                    EventManager.AddPilot(pilot);
+                }
+            }
         }
     }
 }

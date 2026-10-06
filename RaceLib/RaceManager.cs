@@ -1829,6 +1829,17 @@ namespace RaceLib
                         int roundNumber = 1;
                         foreach (Round round in roundTypeGroup)
                         {
+                            // Rounds just holding pasted results aren't shown, so don't take a round number.
+                            if (EventManager.RoundManager.IsPastedResultsRound(round))
+                            {
+                                if (round.RoundNumber != 0)
+                                {
+                                    round.RoundNumber = 0;
+                                    db.Update(round);
+                                }
+                                continue;
+                            }
+
                             if (round.RoundNumber != roundNumber)
                             {
                                 round.RoundNumber = roundNumber;

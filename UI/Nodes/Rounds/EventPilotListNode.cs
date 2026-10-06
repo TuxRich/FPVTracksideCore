@@ -89,7 +89,7 @@ namespace UI.Nodes.Rounds
             mm.Show(position - mie.Translation);
         }
 
-        public void MakeMenu(MouseMenu mm)
+        public virtual void MakeMenu(MouseMenu mm)
         {
             mm.AddItem("Edit Settings", EditSettings);
             if (StageNode != null)     

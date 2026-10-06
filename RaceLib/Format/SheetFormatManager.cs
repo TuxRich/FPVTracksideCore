@@ -213,16 +213,9 @@ namespace RaceLib.Format
                 }
                 else
                 {
-                    Round last = EventManager.RoundManager.GetLastRound(EventTypes.Race);
-                    if (last != null)
-                    {
-                        offset = last.RoundNumber;
-                    }
-                    else
-                    {
-                        // No existing rounds: do not offset sheet round numbers.
-                        offset = 0;
-                    }
+                    // Start after the event's existing race rounds (0 if there are none). Including rounds already in
+                    // other stages, otherwise the sheet's rounds reuse their round numbers and land in those rounds.
+                    offset = EventManager.RaceManager.GetMaxRoundNumber(EventTypes.Race);
                 }
 
                 SheetFile sheetFile = GetSheetFile(stage.SheetFormatFilename);

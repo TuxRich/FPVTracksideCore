@@ -15,6 +15,8 @@ namespace DB.JSON
 
         public TimeSummary TimeSummary { get; set; }
 
+        public PastedResultsSettings PastedResults { get; set; }
+
         public bool LapCountAfterRound { get; set; }
 
         public string SheetFormatFilename { get; set; }
@@ -48,6 +50,12 @@ namespace DB.JSON
                 ReflectionTools.Copy(obj.TimeSummary, TimeSummary);
             }
 
+            if (obj.PastedResults != null)
+            {
+                PastedResults = new PastedResultsSettings();
+                ReflectionTools.Copy(obj.PastedResults, PastedResults);
+            }
+
             Standings = obj.Standings == null ? null : new StandingsResult
             {
                 Headings = obj.Standings.Headings,
@@ -69,6 +77,12 @@ namespace DB.JSON
             {
                 stage.TimeSummary = new RaceLib.TimeSummary();
                 ReflectionTools.Copy(TimeSummary, stage.TimeSummary);
+            }
+
+            if (PastedResults != null)
+            {
+                stage.PastedResults = new RaceLib.PastedResultsSettings();
+                ReflectionTools.Copy(PastedResults, stage.PastedResults);
             }
 
             stage.Standings = Standings == null ? null : new RaceLib.Format.StandingsResult
@@ -93,5 +107,12 @@ namespace DB.JSON
         public bool IncludeAllRounds { get; set; }
 
         public string TimeSummaryType { get; set; }
+    }
+
+    public class PastedResultsSettings
+    {
+        public int FromPosition { get; set; }
+
+        public int ToPosition { get; set; }
     }
 }

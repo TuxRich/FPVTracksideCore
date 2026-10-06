@@ -23,6 +23,7 @@ namespace UI.Nodes.Rounds
         public IEnumerable<EventLapsTimesNode> EventTimesNodes { get { return Children.OfType<EventLapsTimesNode>(); } }
         public IEnumerable<EventLapCountsNode> EventLapCountsNodes { get { return Children.OfType<EventLapCountsNode>(); } }
         public IEnumerable<EventPackCountNode> EventPackCountNodes { get { return Children.OfType<EventPackCountNode>(); } }
+        public IEnumerable<EventPastedResultsNode> EventPastedResultsNodes { get { return Children.OfType<EventPastedResultsNode>(); } }
         public IEnumerable<EventLuaStandingsNode> EventLuaStandingsNodes { get { return Children.OfType<EventLuaStandingsNode>(); } }
         public IEnumerable<EventSheetStandingsNode> EventSheetStandingsNodes { get { return Children.OfType<EventSheetStandingsNode>(); } }
         public IEnumerable<EventResultNode> EventResultNodes { get { return Children.OfType<EventResultNode>(); } }
@@ -224,6 +225,7 @@ namespace UI.Nodes.Rounds
             eventXNode.Times += AddTimeSummary;
             eventXNode.LapCounts += AddLapCount;
             eventXNode.PackCount += AddPackCount;
+            eventXNode.PasteResults += PasteResultsStage;
             eventXNode.Clone += CloneRound;
             eventXNode.AddEmptyRound += AddEmptyRound;
             eventXNode.NeedsFormatLayout += RequestLayout;
@@ -251,7 +253,10 @@ namespace UI.Nodes.Rounds
         private void DoRefresh()
         {
             Round[] rounds = EventManager.RoundManager.Rounds.OrderBy(e => e.Order).ToArray();
-            foreach (Round round in rounds)
+
+            // Rounds just holding pasted results are shown as the results alone.
+            Round[] shownRounds = rounds.Where(r => !RoundManager.IsPastedResultsRound(r)).ToArray();
+            foreach (Round round in shownRounds)
             {
                 IEnumerable<Race> roundRaces = EventManager.RaceManager.GetRaces(round).OrderBy(r => r.RaceNumber);
                 EventRoundNode ern = RoundNodes.FirstOrDefault(d => d.Round == round);
@@ -273,7 +278,7 @@ namespace UI.Nodes.Rounds
 
             foreach (var ern in RoundNodes.ToArray())
             {
-                if (!rounds.Contains(ern.Round))
+                if (!shownRounds.Contains(ern.Round))
                 {
                     ern.Dispose();
                 }
@@ -337,6 +342,22 @@ namespace UI.Nodes.Rounds
                     if (esn == null)
                     {
                         esn = new EventLapCountsNode(this, EventManager, round);
+                        esn.RemoveRound += RemoveResultStage;
+                        HookUp(esn);
+                        AddChild(esn);
+                    }
+                    else
+                    {
+                        esn.Refresh();
+                        RequestLayout();
+                    }
+                }
+                else if (stage.PastedResults != null)
+                {
+                    EventPastedResultsNode esn = EventPastedResultsNodes.FirstOrDefault(d => d.Round == round);
+                    if (esn == null)
+                    {
+                        esn = new EventPastedResultsNode(this, EventManager, round);
                         esn.RemoveRound += RemoveResultStage;
                         HookUp(esn);
                         AddChild(esn);
@@ -503,6 +524,45 @@ namespace UI.Nodes.Rounds
             if (isNew) EditStageName(callingRound);
             ScrollToRound(callingRound);
             Refresh();
+        }
+
+        public void PasteResultsStage(Round callingRound)
+        {
+            StandingsResult pasted = PastedResults.Parse(PlatformTools.Clipboard.GetText());
+            if (!pasted.Rows.Any())
+            {
+                GetLayer<PopupLayer>()?.PopupMessage("No results found on the clipboard. Copy the results (pilot names in finishing order) and try again.");
+                return;
+            }
+
+            // Pasting onto existing pasted results replaces them, so keep the name.
+            Stage stage = callingRound.Stage;
+            string name = stage != null && stage.PastedResults != null ? stage.Name : "Seeding";
+
+            ShowPasteResultsEditor(callingRound, pasted, name, null);
+        }
+
+        public void EditPastedResults(Round round)
+        {
+            Stage stage = round.Stage;
+            if (stage == null || stage.PastedResults == null || stage.Standings == null || stage.Standings.Rows == null)
+                return;
+
+            ShowPasteResultsEditor(round, stage.Standings, stage.Name, stage.PastedResults);
+        }
+
+        private void ShowPasteResultsEditor(Round callingRound, StandingsResult pasted, string stageName, PastedResultsSettings settings)
+        {
+            PasteResultsOptions options = new PasteResultsOptions(pasted, stageName, settings, RoundManager.FindPastedResultPilot);
+
+            PasteResultsEditor editor = new PasteResultsEditor(options);
+            editor.OnOK += (e) =>
+            {
+                Round round = RoundManager.SetPastedResults(callingRound, options.StageName, options.Pasted, options.GetSettings(), options.AddMissingPilots);
+                ScrollToRound(round);
+                Refresh();
+            };
+            GetLayer<PopupLayer>().Popup(editor);
         }
 
         private void GenerateRoundStage(Round round, StageTypes stageType, IEnumerable<Pilot> orderedPilots, Action<Stage> stageSetup)
@@ -816,12 +876,13 @@ namespace UI.Nodes.Rounds
                 if (node == dropped)
                     continue;
 
+                Round round = GetOrderedRound(node);
+
                 if (side == Sides.Right)
                 {
-                    EventRoundNode ern = node as EventRoundNode;
-                    if (ern != null)
+                    if (round != null)
                     {
-                        ern.Round.Order = order;
+                        round.Order = order;
                         order += inc;
                     }
                 }
@@ -834,10 +895,9 @@ namespace UI.Nodes.Rounds
 
                 if (side == Sides.Left)
                 {
-                    EventRoundNode ern = node as EventRoundNode;
-                    if (ern != null)
+                    if (round != null)
                     {
-                        ern.Round.Order = order;
+                        round.Order = order;
                         order += inc;
                     }
                 }
@@ -848,13 +908,27 @@ namespace UI.Nodes.Rounds
                 dropped.Round.Order = order;
             }
 
-            Round[] rounds = RoundNodes.Select(r => r.Round).ToArray();
+            Round[] rounds = Children.Select(GetOrderedRound).Where(r => r != null).ToArray();
             using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
             {
                 db.Update(rounds);
             }
 
             Refresh();
+        }
+
+        // The round a node positions. Rounds just holding pasted results have no round node, their results node positions them.
+        private Round GetOrderedRound(Node node)
+        {
+            EventRoundNode eventRoundNode = node as EventRoundNode;
+            if (eventRoundNode != null)
+                return eventRoundNode.Round;
+
+            EventPastedResultsNode pastedResultsNode = node as EventPastedResultsNode;
+            if (pastedResultsNode != null && RoundManager.IsPastedResultsRound(pastedResultsNode.Round))
+                return pastedResultsNode.Round;
+
+            return null;
         }
 
         public void ScrollToRace(Race race)

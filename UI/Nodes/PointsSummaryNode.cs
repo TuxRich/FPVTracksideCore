@@ -25,7 +25,7 @@ namespace UI.Nodes
 
         public override void CreateHeadings(Node container, out Round[] rounds, out int column)
         {
-            IEnumerable<Round> rs = eventManager.Event.Rounds.Where(r => r.EventType.HasPoints()).OrderBy(r => r.Order).ThenBy(r => r.RoundNumber);
+            IEnumerable<Round> rs = eventManager.Event.Rounds.Where(r => r.EventType.HasPoints() && !eventManager.RoundManager.IsPastedResultsRound(r)).OrderBy(r => r.Order).ThenBy(r => r.RoundNumber);
             if (Round != null)
             {
                 Round start = PointsManager.GetStartRound(Round);

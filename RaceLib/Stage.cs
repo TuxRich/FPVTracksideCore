@@ -32,6 +32,10 @@ namespace RaceLib
         [System.ComponentModel.Browsable(false)]
         public bool PackCountAfterRound { get; set; }
 
+        // Results pasted in from elsewhere (eg another event) to seed from. The pasted rows live in Standings.
+        [System.ComponentModel.Browsable(false)]
+        public PastedResultsSettings PastedResults { get; set; }
+
         [Category("Editable Details")]
         public bool LapCountAfterRound { get; set; }
 
@@ -138,7 +142,7 @@ namespace RaceLib
         {
             get
             {
-                return PointSummary != null || TimeSummary != null || PackCountAfterRound || LapCountAfterRound;
+                return PointSummary != null || TimeSummary != null || PackCountAfterRound || LapCountAfterRound || PastedResults != null;
             }
         }
     }
@@ -179,6 +183,24 @@ namespace RaceLib
         {
             TimeSummaryType = TimeSummaryTypes.PB;
             IncludeAllRounds = false;
+        }
+    }
+
+    public class PastedResultsSettings
+    {
+        // The range of pasted positions (1 based, inclusive) used by this stage. Eg 17 - 32 of a 48 pilot result.
+        public int FromPosition { get; set; }
+        public int ToPosition { get; set; }
+
+        public PastedResultsSettings()
+        {
+            FromPosition = 1;
+            ToPosition = int.MaxValue;
+        }
+
+        public bool Contains(int position)
+        {
+            return position >= FromPosition && position <= ToPosition;
         }
     }
 }

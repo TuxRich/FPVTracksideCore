@@ -266,7 +266,7 @@ namespace UI.Nodes
 
         public virtual void CreateHeadings(Node container, out Round[] rounds, out int column)
         {
-            rounds = eventManager.Event.Rounds.OrderBy(r => r.Order).ThenBy(r => r.RoundNumber).ToArray();
+            rounds = eventManager.Event.Rounds.Where(r => !eventManager.RoundManager.IsPastedResultsRound(r)).OrderBy(r => r.Order).ThenBy(r => r.RoundNumber).ToArray();
 
             column = 0;
             foreach (Round r in rounds)

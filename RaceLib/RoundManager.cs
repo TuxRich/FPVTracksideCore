@@ -370,6 +370,16 @@ namespace RaceLib
             if (onSetup != null)
                 needsStage = true;
 
+            // Snapshot this before onSetup runs: for sheet-format stages, onSetup calls
+            // SheetFormatManager.LoadSheet, which may itself fill callingRound with races,
+            // making IsEmpty(callingRound) unreliable as a "was this round free to use" check
+            // afterwards.
+            bool callingRoundWasEmpty = IsEmpty(callingRound);
+
+            // A round holding pasted results never has races, so it looks empty, but moving it into this stage would
+            // lose them.
+            bool callingRoundHoldsPastedResults = callingRound.Stage != null && callingRound.Stage.PastedResults != null;
+
             Stage stage = null;
             // Don't create a stage if default
             if (needsStage)
@@ -398,16 +408,36 @@ namespace RaceLib
                 stage = callingRound.Stage;
             }
 
-            // Sheet formats create their own rounds and races when the sheet loads (SheetFormatManager.LoadSheet).
-            // Running the stage's round format here as well adds stray races.
-            if (stage != null && !stage.HasSheetFormat)
+            if (stage != null && stage.HasSheetFormat)
+            {
+                // Sheet-format stages fully generate their own rounds/races inside onSetup
+                // (via SheetFormatManager.LoadSheet) and keep generating them as results come
+                // in (via SheetFormatManager.OnRaceResultChange). Running the generic
+                // fill-or-new-round logic below as well would duplicate that with unrelated
+                // generic heats - e.g. a double-elim bracket's calling round ending up filled
+                // with random AutoFormat heats while the real bracket silently landed on the
+                // next round number instead. Only claim callingRound for this stage if it was
+                // actually free to use - if it already had races (eg leftover from an earlier
+                // stage), LoadSheet will have started the bracket on a later round instead, and
+                // callingRound should be left alone rather than mislabelled as this stage's.
+                // Nor if it's holding pasted results.
+                if (callingRoundWasEmpty && !callingRoundHoldsPastedResults && callingRound.Stage != stage)
+                {
+                    using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+                    {
+                        callingRound.Stage = stage;
+                        db.Update(callingRound);
+                    }
+                }
+                return;
+            }
+
+            if (stage != null)
             {
                 RoundPlan roundPlan = new RoundPlan(EventManager, callingRound, null, orderedPilots.ToArray());
 
-                // If we're filling the current round that's empty. Not if it's holding pasted results, they never
-                // have races, so moving the round into this stage would lose them.
-                bool holdsPastedResults = callingRound.Stage != null && callingRound.Stage.PastedResults != null;
-                if (EventManager.RoundManager.IsEmpty(callingRound) && !holdsPastedResults)
+                // If we're filling the current round that's empty.
+                if (EventManager.RoundManager.IsEmpty(callingRound) && !callingRoundHoldsPastedResults)
                 {
                     using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
                     {

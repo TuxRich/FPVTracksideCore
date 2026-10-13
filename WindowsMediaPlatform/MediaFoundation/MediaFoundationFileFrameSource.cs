@@ -533,6 +533,14 @@ namespace WindowsMediaPlatform.MediaFoundation
 
             long target = Math.Max(0, from + count);
 
+            // A seek past the end never completes, so seekingFrame would stay set and each
+            // further step would climb from there. Keep it on the last frame.
+            long lastFrame = GetFrameTime(Length) - 1;
+            if (lastFrame > 0)
+            {
+                target = Math.Min(target, lastFrame);
+            }
+
             bool settled = !pending.HasValue && !seekingFrame.HasValue;
             if (settled)
             {

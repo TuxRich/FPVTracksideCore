@@ -98,6 +98,8 @@ namespace DB.JSON
         public string GameTypeName { get; set; }
         public string TimeZone { get; set; }
 
+        public bool MultiPCReview { get; set; }
+
         public Event()
         {
         }

@@ -271,6 +271,13 @@ namespace RaceLib
 
         public DateTime ScheduledStart { get; set; }
 
+        // Multi-PC review: the revision this copy was loaded or last saved at, and the PC that saved it.
+        [System.ComponentModel.Browsable(false)]
+        public int Revision { get; set; }
+
+        [System.ComponentModel.Browsable(false)]
+        public string SavedBy { get; set; }
+
         public string RaceName
         {
             get
@@ -315,6 +322,55 @@ namespace RaceLib
             clone.Bracket = Bracket;
             clone.RaceNumber = RaceNumber;
             return clone;
+        }
+
+        // Takes on everything that's saved about the race from a copy of it reloaded from disk,
+        // keeping this object as the one the rest of the app references.
+        public void CopySavedState(Race saved)
+        {
+            LinkLaps(saved.Laps, saved.Detections);
+
+            Laps = saved.Laps;
+            Detections = saved.Detections;
+            GamePoints = saved.GamePoints;
+            PilotChannels = saved.PilotChannels;
+
+            Start = saved.Start;
+            End = saved.End;
+            TotalPausedTime = saved.TotalPausedTime;
+            RaceNumber = saved.RaceNumber;
+            Round = saved.Round;
+            TargetLaps = saved.TargetLaps;
+            PrimaryTimingSystemLocation = saved.PrimaryTimingSystemLocation;
+            Valid = saved.Valid;
+            AutoAssignNumbers = saved.AutoAssignNumbers;
+            Bracket = saved.Bracket;
+            ExternalID = saved.ExternalID;
+            Revision = saved.Revision;
+            SavedBy = saved.SavedBy;
+        }
+
+        // Laps reference their race and, for quick access, the race's own detection objects.
+        public void LinkLaps()
+        {
+            LinkLaps(Laps, Detections);
+        }
+
+        private void LinkLaps(List<Lap> laps, List<Detection> detections)
+        {
+            foreach (Lap lap in laps)
+            {
+                lap.Race = this;
+
+                if (lap.Detection != null)
+                {
+                    Detection d = detections.FirstOrDefault(da => da.ID == lap.Detection.ID);
+                    if (d != null)
+                    {
+                        lap.Detection = d;
+                    }
+                }
+            }
         }
 
         public bool HasPilot(Pilot p)
@@ -643,6 +699,99 @@ namespace RaceLib
             {
                 return Laps.Where(predicate).ToArray();
             }
+        }
+
+        // The split timing systems this race has times from. RaceManager.GetSplitTimingSystems has the
+        // ones every race is divided into sectors by.
+        public int[] GetSplitTimingSystems()
+        {
+            // Without laps (e.g. games) the detections aren't lap ends, but aren't splits either.
+            if (!Type.HasLaps())
+                return new int[0];
+
+            lock (Detections)
+            {
+                return Detections.Where(d => !d.IsLapEnd).Select(d => d.TimingSystemIndex).Distinct().OrderBy(i => i).ToArray();
+            }
+        }
+
+        // The sectors the split timing systems divide each lap into. None without laps.
+        public int GetSectorCount(int[] splitTimingSystems)
+        {
+            if (!Type.HasLaps())
+                return 0;
+
+            return splitTimingSystems.Length + 1;
+        }
+
+        // splitTimingSystems end each sector but the last, which ends with the lap.
+        public SectorTime[] GetSectorTimes(Pilot pilot, int[] splitTimingSystems, int sector, bool includeInvalid = false)
+        {
+            Detection[] detections;
+            lock (Detections)
+            {
+                detections = Detections.Where(d => d.Pilot == pilot).ToArray();
+            }
+
+            return GetSectorTimes(pilot, splitTimingSystems, sector, detections, d => d.Time, d => d.Valid, includeInvalid);
+        }
+
+        // Works from the given detections and their times and validity, so an editor can show its unsaved changes.
+        public SectorTime[] GetSectorTimes(Pilot pilot, int[] splitTimingSystems, int sector, IEnumerable<Detection> detections, Func<Detection, DateTime> getTime, Func<Detection, bool> getValid, bool includeInvalid)
+        {
+            int sectorCount = GetSectorCount(splitTimingSystems);
+            if (sector < 1 || sector > sectorCount)
+                return new SectorTime[0];
+
+            bool lastSector = sector == sectorCount;
+            int timingSystem = lastSector ? 0 : splitTimingSystems[sector - 1];
+
+            List<SectorTime> sectorTimes = new List<SectorTime>();
+
+            // Each sector starts at the pilot's previous valid detection, wherever that was.
+            DateTime start = GetHandicappedStart(pilot);
+            int lapNumber = 1;
+            bool beforeHoleshot = PrimaryTimingSystemLocation == PrimaryTimingSystemLocation.Holeshot;
+
+            foreach (Detection detection in detections.OrderBy(getTime))
+            {
+                DateTime time = getTime(detection);
+                bool valid = getValid(detection);
+
+                // The holeshot starts the first lap rather than ending a sector.
+                bool holeshot = beforeHoleshot && valid && detection.IsLapEnd;
+
+                bool endsSector;
+                if (lastSector)
+                {
+                    endsSector = detection.IsLapEnd && !holeshot;
+                }
+                else
+                {
+                    endsSector = !detection.IsLapEnd && detection.TimingSystemIndex == timingSystem;
+                }
+
+                if (endsSector && (valid || includeInvalid))
+                {
+                    sectorTimes.Add(new SectorTime(this, detection, start, time, valid, sector, lapNumber));
+                }
+
+                if (valid)
+                {
+                    start = time;
+
+                    if (holeshot)
+                    {
+                        beforeHoleshot = false;
+                    }
+                    else if (detection.IsLapEnd)
+                    {
+                        lapNumber++;
+                    }
+                }
+            }
+
+            return sectorTimes.ToArray();
         }
 
         public Split GetSplit(Detection detection)

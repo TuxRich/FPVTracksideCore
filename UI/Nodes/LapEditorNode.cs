@@ -43,6 +43,40 @@ namespace UI.Nodes
 
         protected IEnumerable<LapEditorContainer> orderedLapContainers { get { return lapContainers.OrderBy(l => l.End); } }
 
+        // The editor shows either the laps, or the times of one of the sectors they're divided into (see
+        // Race.GetSectorTimes), even without split timing so they can be added. Each sector's times are made
+        // the first time it's shown.
+        private SectorSelection sectorSelection;
+        private int[] splitTimingSystems;
+        private int sectorCount;
+        private Dictionary<int, List<LapEditorContainer>> sectorContainers;
+
+        // 0 when showing the laps.
+        protected int Sector
+        {
+            get
+            {
+                if (sectorSelection.Sector > sectorCount)
+                    return 0;
+
+                return sectorSelection.Sector;
+            }
+        }
+
+        protected IEnumerable<LapEditorContainer> shownContainers
+        {
+            get
+            {
+                List<LapEditorContainer> containers;
+                if (Sector > 0 && sectorContainers.TryGetValue(Sector, out containers))
+                {
+                    return containers.OrderBy(l => l.End);
+                }
+
+                return orderedLapContainers;
+            }
+        }
+
         public RaceManager RaceManager { get; private set; }
 
         public const float DisabledAlpha = 0.3f;
@@ -54,6 +88,7 @@ namespace UI.Nodes
         protected virtual RectangleF RaceNodeBounds => new RectangleF(0.01f, 0.09f, 0.98f, 0.1f);
         protected virtual RectangleF LapsNodeBounds => new RectangleF(0.01f, 0.22f, 0.98f, 0.65f);
         protected virtual float ButtonContainerTop => 1 - 0.10f;
+        protected virtual RectangleF SectorSelectorBounds => new RectangleF(0.79f, 0.01f, 0.2f, 0.06f);
 
         // Grid sizing. Rows are a fixed height, so more laps scroll rather than shrinking
         // every time down to nothing. Fewer columns and rows than the area could hold means
@@ -61,7 +96,8 @@ namespace UI.Nodes
         protected virtual int LapsPerRow => 6;
         protected virtual int VisibleLapRows => 6;
 
-        public LapEditorNode(RaceManager raceManager, Race race, Pilot pilot, IEnumerable<Lap> laps, Color channel)
+        // sectorSelection is shared with whatever opened the editor (e.g. the replay), so both show the same times.
+        public LapEditorNode(RaceManager raceManager, Race race, Pilot pilot, IEnumerable<Lap> laps, Color channel, SectorSelection sectorSelection = null)
         {
             RaceManager = raceManager;
             lapContainers = new List<LapEditorContainer>();
@@ -127,9 +163,158 @@ namespace UI.Nodes
                 OnLapContainerCreated(lc);
             }
 
+            sectorContainers = new Dictionary<int, List<LapEditorContainer>>();
+            splitTimingSystems = raceManager.GetSplitTimingSystems();
+            sectorCount = race.GetSectorCount(splitTimingSystems);
+
+            this.sectorSelection = sectorSelection ?? new SectorSelection();
+            this.sectorSelection.OnChanged += SectorSelection_OnChanged;
+
+            if (sectorCount > 0)
+            {
+                SectorSelectorNode sectorSelector = new SectorSelectorNode(this.sectorSelection, Theme.Current.Editor.Foreground.XNA, Theme.Current.Hover.XNA, Theme.Current.Editor.Text.XNA);
+                sectorSelector.SectorCount = sectorCount;
+                sectorSelector.RelativeBounds = SectorSelectorBounds;
+                background.Inner.AddChild(sectorSelector);
+            }
+
+            if (Sector > 0)
+            {
+                PrepareSectorContainers(Sector);
+            }
+
+            UpdateButtons();
             Layout();
 
             UpdateRaceNode();
+        }
+
+        public override void Dispose()
+        {
+            sectorSelection.OnChanged -= SectorSelection_OnChanged;
+
+            // Whichever aren't shown aren't disposed along with the rest.
+            foreach (LapEditorContainer lc in lapContainers.Concat(sectorContainers.Values.SelectMany(c => c)).Where(c => c.Parent == null))
+            {
+                lc.Dispose();
+            }
+
+            base.Dispose();
+        }
+
+        // e.g. for a change that only applies to the laps.
+        protected void ShowLaps()
+        {
+            sectorSelection.Select(0);
+        }
+
+        private void SectorSelection_OnChanged()
+        {
+            int sector = Sector;
+            if (sector > 0)
+            {
+                PrepareSectorContainers(sector);
+            }
+
+            UpdateButtons();
+            Layout();
+
+            if (sector == 0)
+            {
+                // Picks up any changes made to the last sector, which ends with the lap.
+                UpdateNumbersEtc();
+            }
+            else
+            {
+                UpdateRaceNode();
+            }
+        }
+
+        // Adding and pasting are for laps.
+        private void UpdateButtons()
+        {
+            bool laps = Sector == 0;
+
+            addLapButton.Visible = laps;
+            pasteLapsButton.Visible = laps;
+            copyLapsButton.Text = laps ? "Copy Laps" : "Copy Times";
+        }
+
+        // Makes the sector's times, or updates them for changes made to the laps and other sectors since.
+        private void PrepareSectorContainers(int sector)
+        {
+            // The laps as they stand in the editor. New ones get a stand in detection.
+            Dictionary<Detection, LapEditorContainer> lapEnds = new Dictionary<Detection, LapEditorContainer>();
+            foreach (LapEditorContainer lc in lapContainers)
+            {
+                Detection lapEnd = lc.Lap != null ? lc.Lap.Detection : new Detection(TimingSystemType.Manual, 0, Pilot, null, lc.End, 0, true, 0);
+                lapEnds[lapEnd] = lc;
+            }
+
+            // The split times as they stand in the sectors shown so far.
+            Dictionary<Detection, LapEditorContainer> splits = sectorContainers.Values.SelectMany(c => c).Where(c => c.LinkedLap == null).ToDictionary(c => c.Detection);
+
+            Func<Detection, LapEditorContainer> getEdited = (d) =>
+            {
+                LapEditorContainer lc;
+                if (lapEnds.TryGetValue(d, out lc) || splits.TryGetValue(d, out lc))
+                {
+                    return lc;
+                }
+                return null;
+            };
+
+            IEnumerable<Detection> detections = lapEnds.Keys.Concat(Race.GetDetections(d => d.Pilot == Pilot && !d.IsLapEnd));
+            SectorTime[] sectorTimes = Race.GetSectorTimes(Pilot, splitTimingSystems, sector, detections, d => getEdited(d)?.End ?? d.Time, d => getEdited(d)?.Valid ?? d.Valid, true);
+
+            List<LapEditorContainer> containers;
+            if (!sectorContainers.TryGetValue(sector, out containers))
+            {
+                containers = new List<LapEditorContainer>();
+                sectorContainers.Add(sector, containers);
+            }
+
+            if (sector == sectorCount)
+            {
+                // The last sector ends with the lap, so its times stand for the laps' ends. Made afresh, as the laps may have changed.
+                foreach (LapEditorContainer old in containers)
+                {
+                    old.Dispose();
+                }
+                containers.Clear();
+
+                foreach (SectorTime sectorTime in sectorTimes)
+                {
+                    LapEditorContainer lap = lapEnds[sectorTime.Detection];
+
+                    LapEditorContainer lc = new LapEditorContainer(sectorTime, ChannelColor);
+                    lc.LinkedLap = lap;
+                    lc.OnTimeChanged += () => { lap.End = lc.End; lap.Refresh(); UpdateRaceNode(); };
+                    lc.OnValidityChanged += () => { lap.Valid = lc.Valid; lap.Refresh(); UpdateRaceNode(); };
+                    containers.Add(lc);
+                }
+            }
+            else
+            {
+                foreach (SectorTime sectorTime in sectorTimes)
+                {
+                    LapEditorContainer lc = containers.FirstOrDefault(c => c.Detection == sectorTime.Detection);
+                    if (lc == null)
+                    {
+                        lc = new LapEditorContainer(sectorTime, ChannelColor);
+                        lc.OnTimeChanged += UpdateRaceNode;
+                        lc.OnValidityChanged += UpdateRaceNode;
+                        containers.Add(lc);
+                    }
+                    else
+                    {
+                        // Starts where the time before it ends, which may have changed.
+                        lc.Start = sectorTime.Start;
+                        lc.Number = sectorTime.LapNumber;
+                        lc.Refresh();
+                    }
+                }
+            }
         }
 
         // Personal / overall best colours, resolved the same way the lap bar under the pilot
@@ -174,7 +359,7 @@ namespace UI.Nodes
 
         private void CopyLapsButton_OnClick(MouseInputEvent mie)
         {
-            PlatformTools.Clipboard.SetText(orderedLapContainers.Where(lc => lc.Valid).Select(lc => lc.Length).ToTSV());
+            PlatformTools.Clipboard.SetText(shownContainers.Where(lc => lc.Valid).Select(lc => lc.Length).ToTSV());
         }
 
         private void AddLapButton_OnClick(MouseInputEvent mie)
@@ -222,7 +407,7 @@ namespace UI.Nodes
 
         protected void Layout()
         {
-            foreach (LapEditorContainer lc in lapContainers)
+            foreach (LapEditorContainer lc in lapContainers.Concat(sectorContainers.Values.SelectMany(c => c)))
             {
                 lc.Remove();
             }
@@ -242,7 +427,7 @@ namespace UI.Nodes
             int perRow = LapsPerRow;
             List<Node> rows = new List<Node>();
 
-            foreach (LapEditorContainer lc in orderedLapContainers)
+            foreach (LapEditorContainer lc in shownContainers)
             {
                 Node row = rows.LastOrDefault();
 
@@ -258,6 +443,13 @@ namespace UI.Nodes
             {
                 AlignHorizontally(0.01f, perRow, row.Children.ToArray());
                 lapRows.AddChild(row);
+            }
+
+            // e.g. without split timing. They're added in the replay, where the pilot can be seen crossing the gate.
+            if (Sector > 0 && !rows.Any())
+            {
+                TextNode noTimes = new TextNode("No " + SectorSelection.GetName(Sector) + " times yet - add them in the replay by right clicking the pilot's times", Theme.Current.Editor.Text.XNA);
+                lapRows.AddChild(noTimes);
             }
 
             lapRows.RequestLayout();
@@ -331,7 +523,7 @@ namespace UI.Nodes
             raceNode.AddChild(end);
 
             DateTime last = Race.Start;
-            var validOrderedLapContainers = orderedLapContainers.Where(r => r.Valid);
+            var validOrderedLapContainers = shownContainers.Where(r => r.Valid);
             
             if (validOrderedLapContainers.Any())
             {
@@ -346,7 +538,7 @@ namespace UI.Nodes
             DateTime raceStart = Race.Start;
 
             float prevFactor = 0;
-            foreach (LapEditorContainer lve in orderedLapContainers)
+            foreach (LapEditorContainer lve in shownContainers)
             {
                 TimeSpan sinceRaceStart = lve.End - raceStart;
 
@@ -403,6 +595,12 @@ namespace UI.Nodes
                 {
                     lc.SaveChanges(db);
                 }
+
+                // The split times. The last sector's are the laps', saved above.
+                foreach (var lc in sectorContainers.Values.SelectMany(c => c))
+                {
+                    lc.SaveChanges(db);
+                }
             }
 
             RaceManager.RecalcuateLaps(Pilot, Race);
@@ -439,6 +637,14 @@ namespace UI.Nodes
     public class LapEditorContainer : Node
     {
         public Lap Lap { get; private set; }
+
+        // Set for a sector's time rather than a lap: the detection it ends at.
+        public Detection Detection { get; private set; }
+
+        // The last sector ends with the lap, so its times stand for the laps' ends and change them rather than saving themselves.
+        public LapEditorContainer LinkedLap { get; set; }
+
+        public bool IsSectorTime { get { return Detection != null; } }
 
         public bool Valid { get; set; }
         public int Number { get; set; }
@@ -498,6 +704,16 @@ namespace UI.Nodes
             Lap = lap;
             Valid = lap.Detection.Valid;
             Number = lap.Number;
+
+            Refresh();
+        }
+
+        public LapEditorContainer(SectorTime sectorTime, Color channelColor)
+            : this(sectorTime.Start, sectorTime.End, channelColor)
+        {
+            Detection = sectorTime.Detection;
+            Valid = sectorTime.Valid;
+            Number = sectorTime.LapNumber;
 
             Refresh();
         }
@@ -606,19 +822,24 @@ namespace UI.Nodes
                 {
                     MouseMenu mm = new MouseMenu(this);
 
-                    string valid = "Re-qualify Lap";
+                    string time = IsSectorTime ? "Time" : "Lap";
+
+                    string valid = "Re-qualify " + time;
                     if (Valid)
-                        valid = "Disqualify Lap";
+                        valid = "Disqualify " + time;
 
                     mm.AddItem(valid, () =>
                     {
                         ToggleValidity();
                     });
 
-                    mm.AddSubmenu("Split Lap into...", (i) =>
+                    if (!IsSectorTime)
                     {
-                        OnSplitLap?.Invoke(this, i);
-                    }, new int[] { 2, 3, 4, 5, 6, 7 });
+                        mm.AddSubmenu("Split Lap into...", (i) =>
+                        {
+                            OnSplitLap?.Invoke(this, i);
+                        }, new int[] { 2, 3, 4, 5, 6, 7 });
+                    }
 
                     mm.Show(mouseInputEvent);
                 }
@@ -652,6 +873,17 @@ namespace UI.Nodes
 
                 db.Update(Lap.Detection);
                 db.Update(Lap);
+            }
+            else if (IsSectorTime && LinkedLap == null)
+            {
+                if (Detection.Valid != Valid)
+                {
+                    Detection.Valid = Valid;
+                    Detection.ValidityType = RaceLib.Detection.ValidityTypes.ManualOverride;
+                }
+                Detection.Time = End;
+
+                db.Update(Detection);
             }
         }
 

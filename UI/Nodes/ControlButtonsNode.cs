@@ -92,6 +92,9 @@ namespace UI.Nodes
             AutoRunnerControls = new AutoRunnerControls(autoRunner);
             AddChild(AutoRunnerControls);
 
+            // Multi-PC review: the auto runner runs races and generates rounds.
+            AutoRunnerControls.Visible = !eventManager.MultiPC.IsReviewPC;
+
             WormButton = new IconButtonNode(@"img\worm.png", "Worm", Theme.Current.RightControls.Foreground, Theme.Current.Hover.XNA, Theme.Current.RightControls.Text.XNA);
             AddChild(WormButton);
 
@@ -153,7 +156,7 @@ namespace UI.Nodes
 
             bool inRaceOrPreRace = eventManager.RaceManager.RaceRunning || eventManager.RaceManager.PreRaceStartDelay;
 
-            StartButton.Visible = eventManager.RaceManager.CanRunRace && !eventManager.RaceManager.PreRaceStartDelay;
+            StartButton.Visible = eventManager.RaceManager.CanRunRace && !eventManager.RaceManager.PreRaceStartDelay && !eventManager.MultiPC.IsReviewPC;
             StopButton.Visible = inRaceOrPreRace;
             PasteClipboard.Visible = !eventManager.RaceManager.RaceStarted && !eventManager.RaceManager.PreRaceStartDelay;
             CopyResultsClipboard.Visible = eventManager.RaceManager.RaceFinished;
@@ -195,6 +198,12 @@ namespace UI.Nodes
                 }
             }
 
+            // Multi-PC review: the next race hasn't been run, so a review PC can't open it.
+            if (eventManager.MultiPC.IsReviewPC)
+            {
+                NextButton.Visible = false;
+            }
+
             WormButton.Visible = eventManager.RaceManager.RaceRunning;
 
             EmergencyButton.Visible = StopButton.Visible;
@@ -221,12 +230,7 @@ namespace UI.Nodes
 
                 int height = ItemHeight;
 
-                if (n == AutoRunnerControls && AutoRunnerControls.LargeMode)
-                {
-                    height = (int)(1.7 * ItemHeight);
-                }
-
-                RectangleF newBounds = new RectangleF(left, 
+                RectangleF newBounds = new RectangleF(left,
                                                     prevTop - (ItemPaddingVertical + height),
                                                     width,
                                                     height);

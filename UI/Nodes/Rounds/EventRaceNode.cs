@@ -36,6 +36,10 @@ namespace UI.Nodes.Rounds
 
         private TextNode startTimeNode;
 
+        // Multi-PC review: a review PC reviews races that have been run. It doesn't add or remove races,
+        // or change who's in the ones that haven't been run.
+        public bool CanEditRaces { get { return !EventManager.MultiPC.IsReviewPC; } }
+
         public EventRaceNode(EventManager eventManager, Race race)
         {
             AspectRatio = StandardAspectRatio;
@@ -60,11 +64,11 @@ namespace UI.Nodes.Rounds
 
                 if (heading == null)
                 {
-                    heading = new TextButtonNode(Race.RaceName, Theme.Current.Rounds.RaceTitle, Theme.Current.Hover.XNA, Theme.Current.Rounds.Text.XNA);
+                    heading = new TextButtonNode(HeadingText(), Theme.Current.Rounds.RaceTitle, Theme.Current.Hover.XNA, Theme.Current.Rounds.Text.XNA);
                     heading.OnClick += Heading_OnClick;
                     AddChild(heading);
                 }
-                heading.TextNode.Text = Race.RaceName;
+                heading.TextNode.Text = HeadingText();
                 float headingHeight = 0.15f;
 
                 // Make the heading shrink as the Aspect ratio becomes non-standard
@@ -273,7 +277,7 @@ namespace UI.Nodes.Rounds
 
                     mm.AddItemConfirm("Reset Race", () => { EventManager.RaceManager.ResetRace(Race); Refresh(); });
                 }
-                else
+                else if (CanEditRaces)
                 {
                     string clipboardText = PlatformTools.Clipboard.GetText();
                     bool hasPastePilots;
@@ -304,7 +308,10 @@ namespace UI.Nodes.Rounds
                     mm.AddItemConfirm("Clear Race", () => { EventManager.RaceManager.ClearRace(Race); SyncSheetChange(); Refresh(); });
                 }
 
-                mm.AddItemConfirm("Delete Race", () => { EventManager.RaceManager.RemoveRace(Race, false); SyncSheetChange(); Refresh(true); });
+                if (CanEditRaces)
+                {
+                    mm.AddItemConfirm("Delete Race", () => { EventManager.RaceManager.RemoveRace(Race, false); SyncSheetChange(); Refresh(true); });
+                }
 
                 mm.AddSubmenu("Set Race Bracket", SetBracket, Enum.GetValues(typeof(Brackets)).OfType<Brackets>().ToArray());
                 mm.AddItem("Open Race Folder", () =>
@@ -321,7 +328,7 @@ namespace UI.Nodes.Rounds
                     List<Channel> channels = Race.GetChannel(pilot).GetInterferringChannels(EventManager.Event.Channels).ToList();
                     channels.AddRange(Race.GetFreeFrequencies(EventManager.Event.Channels));
 
-                    if (!hasStarted && channels.Any())
+                    if (!hasStarted && channels.Any() && CanEditRaces)
                     {
                         mm.AddSubmenu("Set Pilot Channel", (c) => { SetChannel(c, pilot); }, channels.ToArray());
                     }
@@ -364,8 +371,8 @@ namespace UI.Nodes.Rounds
                             }
                         });
                     }
-                    else
-                    { 
+                    else if (CanEditRaces)
+                    {
                         mm.AddItem("Remove Pilot ",
                          () =>
                          {
@@ -382,7 +389,8 @@ namespace UI.Nodes.Rounds
                     }
                 }
 
-                if (pilot == null)
+                // A review PC can still put a pilot on a channel of a race that's been run, e.g. to claim its laps.
+                if (pilot == null && (Race.Ended || CanEditRaces))
                 {
                     Pilot[] allPilots = EventManager.Event.Pilots.Except(Race.Pilots).OrderBy(p => p.Name).ToArray();
 
@@ -404,7 +412,7 @@ namespace UI.Nodes.Rounds
                     }, allPilots);
                 }
 
-                if (EventManager.RaceManager.TimingSystemManager.HasDummyTiming)
+                if (EventManager.RaceManager.TimingSystemManager.HasDummyTiming && CanEditRaces)
                 {
                     mm.AddBlank();
                     mm.AddItem("Generate Dummy Race Results", () =>
@@ -425,7 +433,7 @@ namespace UI.Nodes.Rounds
             }
 
             bool clicked = false;
-            if (mouseInputEvent.Button == MouseButtons.Left && mouseInputEvent.ButtonState == ButtonStates.Pressed)
+            if (mouseInputEvent.Button == MouseButtons.Left && mouseInputEvent.ButtonState == ButtonStates.Pressed && CanEditRaces)
             {
                 if (heading.Contains(mouseInputEvent.Position))
                 {
@@ -582,9 +590,21 @@ namespace UI.Nodes.Rounds
         }
 
 
+        private string HeadingText()
+        {
+            // Multi-PC review: a race open on another PC is locked out here.
+            string openOn = EventManager.MultiPC.GetOpenElsewhere(Race);
+            if (openOn != null)
+            {
+                return Race.RaceName + " (open on " + openOn + ")";
+            }
+
+            return Race.RaceName;
+        }
+
         public void Refresh(bool full = false)
         {
-            heading.TextNode.Text = Race.RaceName;
+            heading.TextNode.Text = HeadingText();
             if (Race.Started)
             {
                 startTimeNode.Text = Race.Start.ToShortTimeString();
@@ -691,7 +711,7 @@ namespace UI.Nodes.Rounds
 
             if (ipilotnode != null || prin != null)
             {
-                if (!EventRaceNode.Race.Ended)
+                if (!EventRaceNode.Race.Ended && EventRaceNode.CanEditRaces)
                 {
                    return Bounds;
                 }
@@ -704,7 +724,7 @@ namespace UI.Nodes.Rounds
         {
             PilotRaceInfoNode prin = node as PilotRaceInfoNode;
             IPilot ipilotnode = node as IPilot;
-            if (ipilotnode == null)
+            if (ipilotnode == null || !EventRaceNode.CanEditRaces)
                 return false;
 
             if (EventRaceNode.Race.Ended && (ipilotnode != null || prin != null))

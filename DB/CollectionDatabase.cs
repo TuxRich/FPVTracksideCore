@@ -185,6 +185,10 @@ namespace DB
             return database.LoadResults();
         }
 
+        public bool GetSavedRaceRevision(Guid raceId, out int revision, out string savedBy)
+        {
+            return database.GetSavedRaceRevision(raceId, out revision, out savedBy);
+        }
     }
 
     public interface ICollectionDatabase: IDisposable
@@ -198,6 +202,7 @@ namespace DB
         Event LoadEvent();
         IEnumerable<Race> LoadRaces();
         IEnumerable<Result> LoadResults();
+        bool GetSavedRaceRevision(Guid raceId, out int revision, out string savedBy);
     }
 
     public interface IDatabaseCollection<T>

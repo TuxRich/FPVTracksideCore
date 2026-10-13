@@ -189,11 +189,17 @@ namespace UI.Nodes
 
         private void MakeMenu(MouseInputEvent mouseInputEvent, Pilot pilot)
         {
+            // Multi-PC review: the PC running the event looks after its pilots, a review PC doesn't save the event.
+            bool canEditEvent = !eventManager.MultiPC.IsReviewPC;
+
             MouseMenu mm = new MouseMenu(this);
-            mm.AddItem("Add Pilot", () =>
+            if (canEditEvent)
             {
-                AddPilot();
-            });
+                mm.AddItem("Add Pilot", () =>
+                {
+                    AddPilot();
+                });
+            }
 
             bool anyPilots = eventManager.Event.Pilots.Where(p => p != null).Any();
             if (anyPilots)
@@ -205,15 +211,18 @@ namespace UI.Nodes
                         EditPilots(eventManager.Event.Pilots, pilot);
                     });
 
-                    mm.AddItem("Remove " + pilot.Name + " from event", () =>
+                    if (canEditEvent)
                     {
-                        eventManager.RemovePilot(pilot);
-                    });
+                        mm.AddItem("Remove " + pilot.Name + " from event", () =>
+                        {
+                            eventManager.RemovePilot(pilot);
+                        });
 
-                    mm.AddItem("Take photo", () =>
-                    {
-                        OnTakePhoto?.Invoke(mouseInputEvent, pilot);
-                    });
+                        mm.AddItem("Take photo", () =>
+                        {
+                            OnTakePhoto?.Invoke(mouseInputEvent, pilot);
+                        });
+                    }
                 }
                 else
                 {
@@ -230,6 +239,19 @@ namespace UI.Nodes
                     IEnumerable<string> pilotNames = pilots.Select(p => p.Name).OrderBy(r => r);
                     PlatformTools.Clipboard.SetLines(pilotNames);
                 });
+            }
+
+            if (!canEditEvent)
+            {
+                if (anyPilots)
+                {
+                    mm.Show(mouseInputEvent);
+                }
+                else
+                {
+                    mm.Dispose();
+                }
+                return;
             }
 
             mm.AddItem("Paste Pilots", () =>

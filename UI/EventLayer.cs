@@ -199,6 +199,7 @@ namespace UI
             };
 
             EventManager.OnPilotRefresh += OnPilotRefresh;
+            EventManager.MultiPC.OnMessage += MultiPC_OnMessage;
 
             topBar = new TopBarNode();
             topBar.RelativeBounds = new RectangleF(0, 0, 1, 0.13f); 
@@ -325,7 +326,7 @@ namespace UI
 
             MenuButton.TimingChanged += () =>
             {
-                systemStatusNode.SetupStatuses(EventManager.RaceManager.TimingSystemManager, videoManager, SoundManager, OBSRemoteControlManager, sceneManagerNode.SubtitleNode);
+                systemStatusNode.SetupStatuses(EventManager.RaceManager.TimingSystemManager, videoManager, SoundManager, OBSRemoteControlManager, sceneManagerNode.SubtitleNode, EventManager.MultiPC);
             };
 
             MenuButton.VideoSettingsExited += (bool changed) =>
@@ -361,7 +362,7 @@ namespace UI
             float width = 0.95f;
 
             systemStatusNode = new SystemStatusNode();
-            systemStatusNode.SetupStatuses(EventManager.RaceManager.TimingSystemManager, videoManager, SoundManager, OBSRemoteControlManager, sceneManagerNode.SubtitleNode);
+            systemStatusNode.SetupStatuses(EventManager.RaceManager.TimingSystemManager, videoManager, SoundManager, OBSRemoteControlManager, sceneManagerNode.SubtitleNode, EventManager.MultiPC);
             systemStatusNode.RelativeBounds = new RectangleF((1 - width) / 2, MenuButton.RelativeBounds.Bottom + 0.01f, width, 1);
             rightSideColor.AddChild(systemStatusNode);
 
@@ -468,6 +469,14 @@ namespace UI
             Popuper.PopupCombinedMessage(pilot.Name + " has hit the pack limit of " + limit);
         }
 
+        private void MultiPC_OnMessage(string message)
+        {
+            PlatformTools.Invoke(() =>
+            {
+                Popuper.PopupCombinedMessage(message);
+            });
+        }
+
         private void ClearVelocidroneGateDisplays(Race race)
         {
             foreach (var cn in ChannelsGridNode.ChannelNodes)
@@ -491,6 +500,13 @@ namespace UI
 
         protected virtual void EventEditor()
         {
+            // Multi-PC review: a review PC doesn't save the event.
+            if (EventManager.MultiPC.IsReviewPC)
+            {
+                Popuper.PopupMessage("This PC opened the event to review races. Change the event settings on the PC running the event.");
+                return;
+            }
+
             EventEditor editor = new EventEditor(EventManager.Event);
             ShowEventEditor(editor);
         }
@@ -613,6 +629,8 @@ namespace UI
 
         public override void Dispose()
         {
+            EventManager.MultiPC.OnMessage -= MultiPC_OnMessage;
+
             SoundManager.Dispose();
             EventManager.Dispose();
             workQueueStartStopRace.Dispose();
@@ -635,7 +653,9 @@ namespace UI
         {
             bool recoveredRace = false;
             Race toRecover = EventManager.RaceManager.GetRaceToRecover();
-            if (toRecover != null && EventManager.RaceManager.TimingSystemManager.TimingSystemCount > 0)
+
+            // On a review PC a running race is being run by another PC.
+            if (toRecover != null && EventManager.RaceManager.TimingSystemManager.TimingSystemCount > 0 && !EventManager.MultiPC.IsReviewPC)
             {
                 Popuper.PopupConfirmation("Recover race?", () =>
                 {
@@ -654,7 +674,7 @@ namespace UI
             OBSRemoteControlManager?.Dispose();
             OBSRemoteControlManager = new OBSRemoteControlManager(sceneManagerNode, TabbedMultiNode, EventManager);
 
-            systemStatusNode.SetupStatuses(EventManager.RaceManager.TimingSystemManager, videoManager, SoundManager, OBSRemoteControlManager, sceneManagerNode.SubtitleNode);
+            systemStatusNode.SetupStatuses(EventManager.RaceManager.TimingSystemManager, videoManager, SoundManager, OBSRemoteControlManager, sceneManagerNode.SubtitleNode, EventManager.MultiPC);
         }
 
         public void ResumeRace()
@@ -701,7 +721,7 @@ namespace UI
                     ChannelsGridNode.FillChannelNodes();
 
                     sceneManagerNode.SetupCams();
-                    systemStatusNode.SetupStatuses(EventManager.RaceManager.TimingSystemManager, videoManager, SoundManager, OBSRemoteControlManager, sceneManagerNode.SubtitleNode);
+                    systemStatusNode.SetupStatuses(EventManager.RaceManager.TimingSystemManager, videoManager, SoundManager, OBSRemoteControlManager, sceneManagerNode.SubtitleNode, EventManager.MultiPC);
 
                     if (current != null)
                     {
@@ -949,6 +969,12 @@ namespace UI
         {
             if (!EventManager.RaceManager.CanRunRace)
                 return false;
+
+            if (EventManager.MultiPC.IsReviewPC)
+            {
+                Popuper.PopupCombinedMessage("This PC opened the event to review races, so it can't run them.");
+                return false;
+            }
             
             Race race = EventManager.RaceManager.CurrentRace;
             if (race == null)

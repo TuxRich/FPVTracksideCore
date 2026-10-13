@@ -35,7 +35,29 @@ namespace UI.Nodes
         public int LapLines { get; set; }
 
         public Action<Lap> OnSeekToLap { get; set; }
+        public Action<DateTime> OnSeek { get; set; }
         public Action<Pilot, DateTime> OnAddLap { get; set; }
+
+        // When set (by the replay), shows the selected sector's times instead of the laps.
+        private SectorSelection sectorSelection;
+        public SectorSelection SectorSelection
+        {
+            get { return sectorSelection; }
+            set
+            {
+                if (sectorSelection != null)
+                {
+                    sectorSelection.OnChanged -= RefreshData;
+                }
+
+                sectorSelection = value;
+
+                if (sectorSelection != null)
+                {
+                    sectorSelection.OnChanged += RefreshData;
+                }
+            }
+        }
 
         private TableNode table;
 
@@ -75,7 +97,43 @@ namespace UI.Nodes
         public override void Dispose()
         {
             EventManager.RaceManager.OnLapDisqualified -= RaceManager_OnLapDisqualified;
+            SectorSelection = null;
             base.Dispose();
+        }
+
+        // See RaceManager.GetSplitTimingSystems. Kept until the data's next refreshed, as the playback time's set every frame.
+        private int[] splitTimingSystems;
+        private int[] SplitTimingSystems
+        {
+            get
+            {
+                if (splitTimingSystems == null)
+                {
+                    splitTimingSystems = EventManager.RaceManager.GetSplitTimingSystems();
+                }
+                return splitTimingSystems;
+            }
+        }
+
+        // 0 when showing the laps.
+        private int GetSector(Race race)
+        {
+            if (sectorSelection == null || sectorSelection.Sector == 0 || race == null || sectorSelection.Sector > race.GetSectorCount(SplitTimingSystems))
+                return 0;
+
+            return sectorSelection.Sector;
+        }
+
+        private SectorTime[] GetSectorTimes(Race race, int sector)
+        {
+            IEnumerable<SectorTime> sectorTimes = race.GetSectorTimes(Pilot, SplitTimingSystems, sector);
+
+            if (playbackTime.HasValue)
+            {
+                sectorTimes = sectorTimes.Where(st => st.End <= playbackTime.Value);
+            }
+
+            return sectorTimes.ToArray();
         }
 
         private void RaceManager_OnLapDisqualified(Lap lap)
@@ -157,6 +215,8 @@ namespace UI.Nodes
 
         public void RefreshData()
         {
+            splitTimingSystems = null;
+
             if (Pilot == null)
                 return;
 
@@ -172,6 +232,13 @@ namespace UI.Nodes
 
             if (!r.HasPilot(Pilot))
                 return;
+
+            int sector = GetSector(r);
+            if (sector > 0)
+            {
+                RefreshData(GetSectorTimes(r, sector));
+                return;
+            }
 
             Lap[] laps = r.GetValidLaps(Pilot, true).OrderBy(l => l.End).ToArray();
 
@@ -243,6 +310,38 @@ namespace UI.Nodes
             RequestLayout();
         }
 
+        public void RefreshData(SectorTime[] sectorTimes)
+        {
+            lock (locker)
+            {
+                if (lapNodes == null)
+                    return;
+
+                int start = Math.Max(0, sectorTimes.Length - lapNodes.Length);
+                for (int i = 0; i < lapNodes.Length; i++)
+                {
+                    LapNode lapNode = lapNodes[i];
+                    if (lapNode == null)
+                        continue;
+
+                    int index = start + i;
+                    if (index < sectorTimes.Length)
+                    {
+                        lapNode.SetSectorTime(sectorTimes[index]);
+                        lapNode.Visible = true;
+                        lapNode.Tint = Color.White;
+                    }
+                    else
+                    {
+                        lapNode.Clear();
+                        lapNode.Visible = false;
+                    }
+                }
+            }
+
+            RequestLayout();
+        }
+
         public void AddLap(Lap lap)
         {
             RefreshData();
@@ -266,7 +365,7 @@ namespace UI.Nodes
             {
                 for (int i = 0; i < lapNodes.Length && i < lapNodes.Length; i++)
                 {
-                    bool hasLap = lapNodes[i].Lap != null;
+                    bool hasLap = lapNodes[i].HasTime;
                     lapNodes[i].Visible = hasLap;
                 }
             }
@@ -289,6 +388,14 @@ namespace UI.Nodes
 
         private void Menu(MouseInputEvent mouseInputEvent, LapNode lapNode)
         {
+            Race race = EventManager.RaceManager.CurrentRace;
+            int sector = GetSector(race);
+            if (sector > 0)
+            {
+                SectorMenu(mouseInputEvent, race, sector, lapNode?.SectorTime);
+                return;
+            }
+
             MouseMenu mm = new MouseMenu(this);
 
             Lap lap = null;
@@ -383,6 +490,65 @@ namespace UI.Nodes
             mm.Show(mouseInputEvent);
         }
 
+        // In the replay, times can be added or moved to where the video is, to line them up with the pilot crossing the gate.
+        private void SectorMenu(MouseInputEvent mouseInputEvent, Race race, int sector, SectorTime sectorTime)
+        {
+            MouseMenu mm = new MouseMenu(this);
+            string name = SectorSelection.GetName(sector);
+
+            if (sectorTime != null && OnSeek != null)
+            {
+                mm.AddItem("Seek to " + name, () => { OnSeek(sectorTime.Start); });
+                mm.AddBlank();
+            }
+
+            if (playbackTime.HasValue && OnSeek != null)
+            {
+                mm.AddItem("Add " + name + " Time Now", () =>
+                {
+                    if (playbackTime.HasValue)
+                    {
+                        EventManager.RaceManager.AddManualSectorWithRace(race, Pilot, playbackTime.Value, sector);
+                        UpdateRecords();
+                    }
+                });
+
+                if (sectorTime != null)
+                {
+                    mm.AddItem("Move Time to Now", () =>
+                    {
+                        if (playbackTime.HasValue)
+                        {
+                            EventManager.RaceManager.SetDetectionTime(race, sectorTime.Detection, playbackTime.Value);
+                            UpdateRecords();
+                        }
+                    });
+                }
+            }
+
+            if (EventManager.RaceManager.RaceStarted)
+            {
+                mm.AddItem("Edit " + name + " Times", EditLaps);
+            }
+
+            if (sectorTime != null)
+            {
+                mm.AddBlank();
+                mm.AddItem("Disqualify " + name + " Time", () => { EventManager.RaceManager.DisqualifySectorTime(sectorTime); });
+            }
+
+            mm.Show(mouseInputEvent);
+        }
+
+        // Lap and speed records follow the times.
+        private void UpdateRecords()
+        {
+            EventManager.LapRecordManager.ClearPilot(Pilot);
+            EventManager.LapRecordManager.UpdatePilot(Pilot);
+            EventManager.SpeedRecordManager.UpdatePilot(Pilot);
+            RefreshData();
+        }
+
         private void EditLaps()
         {
             EditLaps(new double[0]);
@@ -400,7 +566,7 @@ namespace UI.Nodes
 
             Lap[] editLaps = currentRace.GetLaps(l => l.Pilot == Pilot).ToArray();
 
-            LapEditorNode editor = new LapEditorNode(EventManager.RaceManager, currentRace, Pilot, editLaps, ChannelColor);
+            LapEditorNode editor = new LapEditorNode(EventManager.RaceManager, currentRace, Pilot, editLaps, ChannelColor, sectorSelection);
 
             if (lapsToAdd.Any())
             {
@@ -416,10 +582,7 @@ namespace UI.Nodes
                     currentRace.ReCalculateLaps(db, Pilot);
                 }
 
-                EventManager.LapRecordManager.ClearPilot(Pilot);
-                EventManager.LapRecordManager.UpdatePilot(Pilot);
-                EventManager.SpeedRecordManager.UpdatePilot(Pilot);
-                RefreshData();
+                UpdateRecords();
             };
         }
 
@@ -441,7 +604,7 @@ namespace UI.Nodes
                 .Select(ts => ts.GetWaveform(currentRace.ID, Pilot.ID))
                 .FirstOrDefault(w => w != null);
 
-            MarshalEditorNode editor = new MarshalEditorNode(EventManager.RaceManager, currentRace, Pilot, editLaps, ChannelColor, waveform);
+            MarshalEditorNode editor = new MarshalEditorNode(EventManager.RaceManager, currentRace, Pilot, editLaps, ChannelColor, waveform, sectorSelection);
 
             GetLayer<PopupLayer>().Popup(editor);
             editor.OnOK += (v) =>
@@ -452,10 +615,7 @@ namespace UI.Nodes
                     currentRace.ReCalculateLaps(db, Pilot);
                 }
 
-                EventManager.LapRecordManager.ClearPilot(Pilot);
-                EventManager.LapRecordManager.UpdatePilot(Pilot);
-                EventManager.SpeedRecordManager.UpdatePilot(Pilot);
-                RefreshData();
+                UpdateRecords();
             };
         }
 
@@ -479,6 +639,22 @@ namespace UI.Nodes
                 if (lapsPerRow != GetLapsPerRowCount() || LapLines != table.Rows)
                     UpdateLapCount();
 
+                int sector = GetSector(r);
+                if (sector > 0)
+                {
+                    SectorTime[] sectorTimes = GetSectorTimes(r, sector);
+
+                    SectorTime lastShown = lapNodes.LastOrDefault(ln => ln != null && ln.SectorTime != null)?.SectorTime;
+                    int shown = lapNodes.Count(ln => ln != null && ln.SectorTime != null);
+
+                    if (Math.Min(sectorTimes.Length, lapNodes.Length) != shown ||
+                        (sectorTimes.Any() && sectorTimes.Last().Detection != lastShown?.Detection))
+                    {
+                        RefreshData(sectorTimes);
+                    }
+                    return;
+                }
+
                 Lap[] laps = r.GetValidLaps(Pilot, true).OrderBy(l => l.End).Where(lap => lap.Detection.Time <= playbackTime.Value).ToArray();
 
                 int visibleCount = lapNodes.Count(ln => ln != null && ln.Visible);
@@ -497,6 +673,11 @@ namespace UI.Nodes
         public event OnLapNode OnRightClick;
 
         public Lap Lap { get; private set; }
+
+        // Shown instead of a lap, see LapsNode.SectorSelection.
+        public SectorTime SectorTime { get; private set; }
+
+        public bool HasTime { get { return Lap != null || SectorTime != null; } }
 
         private const string empty = "";
 
@@ -534,6 +715,7 @@ namespace UI.Nodes
         {
             textNode.Text = Title + empty;
             Lap = null;
+            SectorTime = null;
         }
 
         public void SetLap(Lap lap)
@@ -544,7 +726,7 @@ namespace UI.Nodes
                 Lap = null;
                 return;
             }
-                
+
             string newText = Title;
             if (IncludeRace)
             {
@@ -559,12 +741,33 @@ namespace UI.Nodes
 
             textNode.Text = newText;
             Lap = lap;
+            SectorTime = null;
         }
 
+        public void SetSectorTime(SectorTime sectorTime)
+        {
+            if (sectorTime == null)
+            {
+                Clear();
+                return;
+            }
+
+            string newText = Title;
+            if (IncludeLapNumber)
+            {
+                newText += Lap.LapNumberToString(sectorTime.LapNumber) + " ";
+            }
+
+            newText += "S" + sectorTime.Sector + " " + sectorTime.Length.ToStringRaceTime();
+
+            textNode.Text = newText;
+            Lap = null;
+            SectorTime = sectorTime;
+        }
 
         public override bool OnMouseInput(MouseInputEvent mouseInputEvent)
         {
-            if (Lap != null)
+            if (HasTime)
             {
                 if (mouseInputEvent.Button == MouseButtons.Right && mouseInputEvent.ButtonState == ButtonStates.Released)
                 {
@@ -574,11 +777,18 @@ namespace UI.Nodes
 
                 if (mouseInputEvent.ButtonState == ButtonStates.Released && CompositorLayer.InputEventFactory.AreControlKeysDown())
                 {
-                    em.RaceManager.DisqualifyLap(Lap);
+                    if (Lap != null)
+                    {
+                        em.RaceManager.DisqualifyLap(Lap);
+                    }
+                    else
+                    {
+                        em.RaceManager.DisqualifySectorTime(SectorTime);
+                    }
                     return true;
                 }
             }
-            
+
             return base.OnMouseInput(mouseInputEvent);
         }
     }

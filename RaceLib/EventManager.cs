@@ -66,9 +66,13 @@ namespace RaceLib
         public ExternalRaceProvider[] ExternalRaceProviders { get; set; }
 
         public ProfilePictures ProfilePictures { get; private set; }
+
+        public MultiPCManager MultiPC { get; private set; }
+
         public EventManager(Profile profile)
         {
             Profile = profile;
+            MultiPC = new MultiPCManager(this);
             Init();
 
             RaceStringFormatter = new RaceStringFormatter(this);
@@ -93,6 +97,7 @@ namespace RaceLib
 
         public void Dispose()
         {
+            MultiPC.Dispose();
             RaceManager.Dispose();
         }
 

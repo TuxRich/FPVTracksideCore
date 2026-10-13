@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using Tools;
@@ -340,9 +341,12 @@ namespace RaceLib
 
                     result.Points = GetPoints(result.Position);
 
-                    using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+                    if (!EventManager.MultiPC.IsReviewPC)
                     {
-                        db.Update(result);
+                        using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+                        {
+                            db.Update(result);
+                        }
                     }
                 }
             }
@@ -371,9 +375,13 @@ namespace RaceLib
             result.ResultType = Result.ResultTypes.RoundRollOver;
             result.DNF = false;
 
-            using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+            // Multi-PC review: shown on a review PC but saved by the PC running the event, or both would save one.
+            if (!EventManager.MultiPC.IsReviewPC)
             {
-                db.Insert(result);
+                using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+                {
+                    db.Insert(result);
+                }
             }
 
             lock (Results)
@@ -475,7 +483,7 @@ namespace RaceLib
             }
         }
 
-        private bool ClearResultsNoTrigger(Race race)
+        private bool ClearResultsNoTrigger(Race race, bool save = true)
         {
             lock (Results)
             {
@@ -486,9 +494,12 @@ namespace RaceLib
 
                 Results.RemoveAll(r => toRemove.Contains(r));
 
-                using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+                if (save)
                 {
-                    db.Delete(toRemove);
+                    using (IDatabase db = DatabaseFactory.Open(EventManager.EventId))
+                    {
+                        db.Delete(toRemove);
+                    }
                 }
                 return true;
             }
@@ -501,13 +512,55 @@ namespace RaceLib
 
         public bool SaveResults(IDatabase db, Race race)
         {
+            return SaveResults(db, race, true, true);
+        }
+
+        // Multi-PC review: recalculates the results of a race reloaded from disk, saving them only if save is set.
+        public void RecalculateResults(Race race, bool save)
+        {
+            string before = GetResultsSummary(race);
+
+            if (!race.Valid || !SaveResults(null, race, save, false))
+            {
+                // It has none any more, e.g. it was reset or deleted.
+                ClearResultsNoTrigger(race, save);
+            }
+
+            // Only if they've actually changed, as that can generate the next round. Just opening a race on another PC saves it.
+            if (GetResultsSummary(race) != before)
+            {
+                RaceResultsChanged?.Invoke(race);
+            }
+        }
+
+        private string GetResultsSummary(Race race)
+        {
+            Result[] results;
+            lock (Results)
+            {
+                results = Results.Where(r => r.Race != null && r.Race.ID == race.ID).OrderBy(r => r.Pilot?.ID).ToArray();
+            }
+
+            return string.Join(";", results.Select(r => r.Pilot?.ID + " " + r.Position + " " + r.Points + " " + r.DNF + " " + r.Time.Ticks + " " + r.LapsFinished));
+        }
+
+        // The same race and pilot always get the same result ID, so recalculating a result replaces it,
+        // even when the old one was saved by another PC.
+        private static Guid GetResultID(Race race, Pilot pilot)
+        {
+            byte[] ids = race.ID.ToByteArray().Concat(pilot.ID.ToByteArray()).ToArray();
+            return new Guid(MD5.HashData(ids));
+        }
+
+        private bool SaveResults(IDatabase db, Race race, bool save, bool notify)
+        {
             if (!race.Ended)
                 return false;
 
             if (!race.Round.EventType.HasResult())
                 return false;
 
-            ClearResultsNoTrigger(race);
+            ClearResultsNoTrigger(race, save);
 
             List<Result> newResults = new List<Result>();
             PilotTime[] orderedBestLapTimes = race.GetBestLapsTimes(race.TargetLaps).OrderBy(t => t.Time).ToArray();
@@ -535,6 +588,7 @@ namespace RaceLib
                 }
 
                 Result r = new Result();
+                r.ID = GetResultID(race, pilot);
                 r.Event = race.Event;
                 r.Race = race;
                 r.Pilot = pilot;
@@ -580,16 +634,19 @@ namespace RaceLib
                 }
             }
 
-            if (db == null)
+            if (save)
             {
-                using (IDatabase db2 = DatabaseFactory.Open(EventManager.EventId))
+                if (db == null)
                 {
-                    db2.Insert(newResults);
+                    using (IDatabase db2 = DatabaseFactory.Open(EventManager.EventId))
+                    {
+                        db2.Insert(newResults);
+                    }
                 }
-            }
-            else
-            {
-                db.Insert(newResults);
+                else
+                {
+                    db.Insert(newResults);
+                }
             }
 
             lock (Results)
@@ -597,7 +654,10 @@ namespace RaceLib
                 Results.AddRange(newResults);
             }
 
-            RaceResultsChanged?.Invoke(race);
+            if (notify)
+            {
+                RaceResultsChanged?.Invoke(race);
+            }
 
             return true;
         }

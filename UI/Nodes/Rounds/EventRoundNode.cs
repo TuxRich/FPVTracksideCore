@@ -171,7 +171,8 @@ namespace UI.Nodes.Rounds
 
             UpdateTitle();
 
-            instructionNode.Visible = !races.Any();
+            // The instructions are for adding races, which a review PC doesn't.
+            instructionNode.Visible = !races.Any() && CanEditRounds;
 
             foreach (Race race in races)
             {
@@ -247,6 +248,18 @@ namespace UI.Nodes.Rounds
 
         private void ShowMenu(MouseInputEvent mie, Point position)
         {
+            // Multi-PC review: everything else here changes the round, so a review PC can only copy it.
+            if (!CanEditRounds)
+            {
+                if (hasRace)
+                {
+                    MouseMenu reviewMenu = new MouseMenu(this);
+                    reviewMenu.AddItem("Copy Round", CopyPilots);
+                    reviewMenu.Show(position - mie.Translation);
+                }
+                return;
+            }
+
             string clipboardText = PlatformTools.Clipboard.GetText();
             int pasteRaceCount = 0;
             if (PastedRace.TryParsePastedRaces(clipboardText, out List<PastedRace> jsonRaces))
@@ -573,7 +586,7 @@ namespace UI.Nodes.Rounds
                 return true;
             }
 
-            if (mouseInputEvent.Button == MouseButtons.Left && mouseInputEvent.ButtonState == ButtonStates.Pressed)
+            if (mouseInputEvent.Button == MouseButtons.Left && mouseInputEvent.ButtonState == ButtonStates.Pressed && CanEditRounds)
             {
                 MouseInputEvent translated = Translate(mouseInputEvent);
                 if (heading.Contains(translated.Position))
@@ -606,7 +619,7 @@ namespace UI.Nodes.Rounds
             canAddFinal = Round.StageType != StageTypes.Final;
             canAddRace = true;
 
-            RemoveRoundButton.Visible = canRemove;
+            RemoveRoundButton.Visible = canRemove && CanEditRounds;
         }
         
         public override bool IsRoundInStage()

@@ -40,7 +40,10 @@ namespace UI.Nodes.Rounds
             base.MakeMenu(mm);
 
             // Replaces these results with the clipboard's.
-            mm.AddItem("Paste Results...", () => { RoundsNode.PasteResultsStage(Round); });
+            if (CanEditRounds)
+            {
+                mm.AddItem("Paste Results...", () => { RoundsNode.PasteResultsStage(Round); });
+            }
         }
 
         public override string[][] MakeTable()

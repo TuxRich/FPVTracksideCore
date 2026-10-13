@@ -23,6 +23,9 @@ namespace UI.Nodes
     {
         public static string dateFormat = "d MMM";
 
+        // Multi-PC review takes effect when the event is opened, so it's only offered when choosing an event.
+        protected virtual bool ShowMultiPCReview { get { return false; } }
+
         public EventEditor(Event eventa) 
             :this(new SimpleEvent[] { new SimpleEvent(eventa) }, false, false)
         { 
@@ -115,6 +118,11 @@ namespace UI.Nodes
                 }
             }
 
+            if (pi.Name == "MultiPCReview" && !ShowMultiPCReview)
+            {
+                return null;
+            }
+
             PropertyNode<SimpleEvent> n = base.CreatePropertyNode(obj, pi);
 
 
@@ -157,6 +165,12 @@ namespace UI.Nodes
 
         public TextButtonNode CloneButton { get; private set; }
         public TextButtonNode RecoverButton { get; private set; }
+        public TextButtonNode ReviewButton { get; private set; }
+
+        // Opened with the Review button, to review races while another PC runs the event.
+        public bool OpenForReview { get; private set; }
+
+        protected override bool ShowMultiPCReview { get { return true; } }
 
         public Profile Profile { get { return MenuButton.Profile; } }
 
@@ -216,7 +230,7 @@ namespace UI.Nodes
             SetSelected(lastOpened);
 
 
-            Node[] buttons = new Node[] { addButton, removeButton, CloneButton, RecoverButton, cancelButton, okButton };
+            Node[] buttons = new Node[] { addButton, removeButton, CloneButton, RecoverButton, cancelButton, ReviewButton, okButton };
             buttonContainer.SetOrder(buttons);
 
             AlignVisibleButtons();
@@ -241,10 +255,45 @@ namespace UI.Nodes
                 CloneButton = new TextButtonNode("Clone", ButtonBackground, ButtonHover, TextColor);
                 CloneButton.OnClick += Clone;
                 buttonContainer.AddChild(CloneButton);
+
+                ReviewButton = new TextButtonNode(Translator.Get("Button.Review", "Review"), ButtonBackground, ButtonHover, TextColor);
+                ReviewButton.OnClick += (mie) =>
+                {
+                    OpenForReview = true;
+                    OkButton_OnClick(mie);
+                };
+                ReviewButton.Visible = false;
+                buttonContainer.AddChild(ReviewButton);
             }
             itemName.Visible = false;
 
             AlignVisibleButtons();
+        }
+
+        protected override void DoSetSelected(SimpleEvent obj)
+        {
+            base.DoSetSelected(obj);
+            UpdateReviewButton();
+        }
+
+        protected override void ChildValueChanged(Change newChange)
+        {
+            base.ChildValueChanged(newChange);
+            UpdateReviewButton();
+        }
+
+        // Review is only offered for events set up for multi-PC review.
+        private void UpdateReviewButton()
+        {
+            if (ReviewButton == null)
+                return;
+
+            bool visible = Selected != null && Selected.MultiPCReview;
+            if (ReviewButton.Visible != visible)
+            {
+                ReviewButton.Visible = visible;
+                AlignVisibleButtons();
+            }
         }
 
         private void MenuButton_ProfileSet(Profile profile)

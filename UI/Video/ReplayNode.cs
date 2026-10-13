@@ -28,6 +28,9 @@ namespace UI.Video
 
         public SeekNode SeekNode { get; private set; }
 
+        // Whether the pilots' times and the seek bar's markers are the laps or a sector's, picked on the seek bar.
+        public SectorSelection SectorSelection { get; private set; }
+
         private const float seekBarHeight = 0.05f;
 
         private IPlaybackFrameSource primary;
@@ -100,7 +103,9 @@ namespace UI.Video
             EventManager.GameManager.OnGamePointChanged += OnChange;
 
 
-            SeekNode = new SeekNode(eventManager, Theme.Current.Replay.Text.XNA);
+            SectorSelection = new SectorSelection();
+
+            SeekNode = new SeekNode(eventManager, Theme.Current.Replay.Text.XNA, SectorSelection);
             SeekNode.RelativeBounds = new RectangleF(0.1f, 1 - seekBarHeight, 0.8f, seekBarHeight);
             SeekNode.Seek += Seek;
             SeekNode.PlayButton.OnClick += (m) => { Play(); };
@@ -311,7 +316,9 @@ namespace UI.Video
                     foreach (ChannelNodeBase cbn in channelNodes)
                     {
                         cbn.LapsNode.OnSeekToLap = (l) => { Seek(l.Start); };
+                        cbn.LapsNode.OnSeek = Seek;
                         cbn.LapsNode.OnAddLap = (pilot, time) => { EventManager.RaceManager.AddManualLapWithRace(race, pilot, time, 0); };
+                        cbn.LapsNode.SectorSelection = SectorSelection;
                         cbn.OnCloseClick += () => { Hide(cbn); };
                         cbn.OnCrashedOutClick += () => { Hide(cbn); };
                         cbn.OnFullscreen += () => { FullScreen(cbn); };

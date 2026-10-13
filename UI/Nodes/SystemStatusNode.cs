@@ -4,6 +4,7 @@ using Composition.Nodes;
 using ExternalData;
 using ImageServer;
 using Microsoft.Xna.Framework;
+using RaceLib;
 using Sound;
 using System;
 using System.Collections.Generic;
@@ -29,7 +30,7 @@ namespace UI.Nodes
         {
         }
 
-        public void SetupStatuses(TimingSystemManager timingSystemManager, VideoManager videoManager, SoundManager soundManager, OBSRemoteControlManager oBSRemoteControlManager, SubtitleNode subtitleNode)
+        public void SetupStatuses(TimingSystemManager timingSystemManager, VideoManager videoManager, SoundManager soundManager, OBSRemoteControlManager oBSRemoteControlManager, SubtitleNode subtitleNode, MultiPCManager multiPC = null)
         {
             ClearDisposeChildren();
 
@@ -61,6 +62,11 @@ namespace UI.Nodes
             {
                 OBS = new OBSStatusNode(oBSRemoteControlManager);
                 AddChild(OBS);
+            }
+
+            if (multiPC != null && multiPC.Active)
+            {
+                AddChild(new MultiPCStatusNode(multiPC));
             }
 
             RequestLayout();
@@ -542,6 +548,37 @@ namespace UI.Nodes
             cbn.Value = oBSRemoteControlManager.Active;
 
             this.Visible = oBSRemoteControlManager.Enabled;
+        }
+    }
+
+    // Multi-PC review: whether this PC runs the event or reviews races, and the other PCs with it open.
+    public class MultiPCStatusNode : StatusNode
+    {
+        public MultiPCManager MultiPC { get; private set; }
+
+        public MultiPCStatusNode(MultiPCManager multiPC)
+            : base(@"img/replay.png")
+        {
+            MultiPC = multiPC;
+            Name = multiPC.Role == MultiPCRoles.Review ? "REV" : "CTRL";
+        }
+
+        public override void StatusUpdate()
+        {
+            base.StatusUpdate();
+
+            MultiPCStatus[] peers = MultiPC.GetPeers().ToArray();
+            if (!peers.Any())
+            {
+                // Fine for the PC running the event, but a review PC isn't getting anything.
+                SetStatus("No PCs", MultiPC.Role == MultiPCRoles.RaceControl);
+                return;
+            }
+
+            bool hasRaceControl = MultiPC.Role == MultiPCRoles.RaceControl || peers.Any(p => p.Role == MultiPCRoles.RaceControl);
+
+            MultiPCStatus chosen = peers.GetFromCurrentTime(updateEverySeconds);
+            SetStatus(chosen.MachineName, hasRaceControl);
         }
     }
 

@@ -32,6 +32,7 @@ namespace UI.Nodes
         protected override RectangleF RaceNodeBounds => new RectangleF(0.01f, 0.57f, 0.98f, 0.04f);
         protected override RectangleF LapsNodeBounds => new RectangleF(0.01f, 0.63f, 0.98f, 0.295f);
         protected override float ButtonContainerTop => 0.945f;
+        protected override RectangleF SectorSelectorBounds => new RectangleF(0.79f, 0.005f, 0.2f, 0.035f);
 
         // waveform may be null until RotorHazard's ts_race_marshal broadcast is extended to
         // include history_values/history_times/enter_at/exit_at - the graph just stays hidden
@@ -42,8 +43,8 @@ namespace UI.Nodes
         // must not depend on the waveform field. It only builds the (still-empty) widgets;
         // SetWaveform() below is what actually populates them, called once base construction
         // has finished and the field exists.
-        public MarshalEditorNode(RaceManager raceManager, Race race, Pilot pilot, IEnumerable<Lap> laps, Color channel, RSSIWaveform waveform)
-            : base(raceManager, race, pilot, laps, channel)
+        public MarshalEditorNode(RaceManager raceManager, Race race, Pilot pilot, IEnumerable<Lap> laps, Color channel, RSSIWaveform waveform, SectorSelection sectorSelection = null)
+            : base(raceManager, race, pilot, laps, channel, sectorSelection)
         {
             AspectRatio = 1.6f;
             Scale(0.94f, 0.94f);
@@ -145,6 +146,9 @@ namespace UI.Nodes
                 return;
 
             List<RSSICrossingCalculator.Crossing> crossings = RSSICrossingCalculator.Calculate(waveform.Times, waveform.Values, enterAt, exitAt);
+
+            // The waveform is the lap timing system's, so this is about the laps.
+            ShowLaps();
 
             // NOTE: this replaces all laps with the recalculated set - unlike RotorHazard's own
             // Recalculate, it doesn't yet preserve manually-added laps separately, since

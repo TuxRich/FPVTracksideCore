@@ -186,7 +186,8 @@ namespace UI.Nodes.Rounds
 
         public override bool OnMouseInput(MouseInputEvent mouseInputEvent)
         {
-            if (mouseInputEvent.Button == MouseButtons.Right && mouseInputEvent.ButtonState == ButtonStates.Released && Title.Contains(mouseInputEvent.Position))
+            // Multi-PC review: a review PC doesn't change the stages.
+            if (mouseInputEvent.Button == MouseButtons.Right && mouseInputEvent.ButtonState == ButtonStates.Released && Title.Contains(mouseInputEvent.Position) && !EventManager.MultiPC.IsReviewPC)
             {
                 MouseMenu mm = new MouseMenu(this);
 

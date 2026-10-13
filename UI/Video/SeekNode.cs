@@ -12,6 +12,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Tools;
+using UI.Nodes;
 
 namespace UI.Video
 {
@@ -41,8 +42,17 @@ namespace UI.Video
         public TextButtonNode ShowAll { get; private set; }
 
         private Node buttonsNode;
+        private Node barContainer;
 
         private Node flagLabels;
+
+        // Picks the laps, or a sector, for the markers and the pilots' lap times. Only there for races with laps.
+        private SectorSelection sectorSelection;
+        private SectorSelectorNode sectorSelector;
+
+        private const float slowWidth = 0.05f;
+        private const float showAllWidth = 0.05f;
+        private const float sectorWidth = 0.06f;
 
         private EventManager eventManager;
 
@@ -55,17 +65,19 @@ namespace UI.Video
         public DateTime Start { get; set; }
         public DateTime End { get; set; }
 
-        public SeekNode(EventManager eventManager, Color color)
+        public SeekNode(EventManager eventManager, Color color, SectorSelection sectorSelection)
         {
             this.eventManager = eventManager;
+            this.sectorSelection = sectorSelection;
+            sectorSelection.OnChanged += SectorSelection_OnChanged;
 
-            Node container = new Node();
-            container.RelativeBounds = new RectangleF(0, 0.0f, 1, 0.6f);
-            AddChild(container);
+            barContainer = new Node();
+            barContainer.RelativeBounds = new RectangleF(0, 0.0f, 1, 0.6f);
+            AddChild(barContainer);
 
             buttonsNode = new Node();
             buttonsNode.RelativeBounds = new RectangleF(0, 0, 0.02f, 1);
-            container.AddChild(buttonsNode);
+            barContainer.AddChild(buttonsNode);
 
             PlayButton = new ImageButtonNode(@"img\start.png", Color.Transparent, Theme.Current.Hover.XNA, color);
             buttonsNode.AddChild(PlayButton);
@@ -73,31 +85,62 @@ namespace UI.Video
             StopButton = new ImageButtonNode(@"img\stop.png", Color.Transparent, Theme.Current.Hover.XNA, color);
             buttonsNode.AddChild(StopButton);
 
-            float slowWidth = 0.05f;
-            float showAllWidth = 0.05f;
+            sectorSelector = new SectorSelectorNode(sectorSelection, Color.Transparent, Theme.Current.Hover.XNA, color);
+            sectorSelector.RelativeBounds = new RectangleF(1 - (showAllWidth + slowWidth + sectorWidth), 0, sectorWidth, 1);
+            sectorSelector.Scale(1, 0.8f);
+            sectorSelector.Visible = false;
+            barContainer.AddChild(sectorSelector);
 
             SlowCheck = new TextCheckBoxNode("Slow", color, false);
             SlowCheck.RelativeBounds = new RectangleF(1 - (showAllWidth + slowWidth), 0, slowWidth, 1);
             SlowCheck.SetRatio(0.6f, 0.05f);
             SlowCheck.Scale(1, 0.8f);
-            container.AddChild(SlowCheck);
+            barContainer.AddChild(SlowCheck);
 
             ShowAll = new TextButtonNode("Show All", Color.Transparent, Theme.Current.Hover.XNA, color);
             ShowAll.RelativeBounds = new RectangleF(1 - showAllWidth, 0, showAllWidth, 1);
             ShowAll.Scale(1, 0.8f);
             ShowAll.TextNode.RelativeBounds = new RectangleF(0, 0, 1, 1);
-            container.AddChild(ShowAll);
+            barContainer.AddChild(ShowAll);
 
             progressBar = new ProgressBarNode(color);
-            progressBar.RelativeBounds = new RectangleF(buttonsNode.RelativeBounds.Right, 0, 1 - (buttonsNode.RelativeBounds.Right + showAllWidth + slowWidth), 1);
-            container.AddChild(progressBar);
+            barContainer.AddChild(progressBar);
 
             progressBarLineContainer = new Node();
             progressBar.AddChild(progressBarLineContainer);
 
             flagLabels = new Node();
-            flagLabels.RelativeBounds = new RectangleF(progressBar.RelativeBounds.X, container.RelativeBounds.Bottom, progressBar.RelativeBounds.Width, 1 - container.RelativeBounds.Bottom);
             AddChild(flagLabels);
+
+            LayoutBar();
+        }
+
+        public override void Dispose()
+        {
+            sectorSelection.OnChanged -= SectorSelection_OnChanged;
+            base.Dispose();
+        }
+
+        // The bar takes up the room the sector selector would when it's not there.
+        private void LayoutBar()
+        {
+            float right = showAllWidth + slowWidth;
+            if (sectorSelector.Visible)
+            {
+                right += sectorWidth;
+            }
+
+            progressBar.RelativeBounds = new RectangleF(buttonsNode.RelativeBounds.Right, 0, 1 - (buttonsNode.RelativeBounds.Right + right), 1);
+            flagLabels.RelativeBounds = new RectangleF(progressBar.RelativeBounds.X, barContainer.RelativeBounds.Bottom, progressBar.RelativeBounds.Width, 1 - barContainer.RelativeBounds.Bottom);
+            RequestLayout();
+        }
+
+        private void SectorSelection_OnChanged()
+        {
+            if (race != null)
+            {
+                SetRace(race, mediaStart, mediaEnd);
+            }
         }
 
         public void ClearFlags()
@@ -154,6 +197,25 @@ namespace UI.Video
             Start = race.Start > mediaStart ? mediaStart : race.Start;
             End = race.End < mediaEnd ? mediaEnd : race.End;
 
+            int[] splitTimingSystems = eventManager.RaceManager.GetSplitTimingSystems();
+            int sectorCount = race.GetSectorCount(splitTimingSystems);
+            sectorSelector.SectorCount = sectorCount;
+            if (sectorSelector.Visible != sectorCount > 0)
+            {
+                sectorSelector.Visible = sectorCount > 0;
+                LayoutBar();
+            }
+
+            // e.g. a race with fewer sectors than the one replayed before it.
+            if (sectorSelection.Sector > sectorCount)
+            {
+                // Which comes back here to show the laps.
+                sectorSelection.Select(0);
+                return;
+            }
+
+            int sector = sectorSelection.Sector;
+
             foreach (PilotChannel pilotChannel in race.PilotChannelsSafe)
             {
                 if (filterPilot != null && pilotChannel.Pilot != filterPilot)
@@ -161,18 +223,28 @@ namespace UI.Video
 
                 Color tint = eventManager.GetRaceChannelColor(race, pilotChannel.Channel);
 
-                Lap[] laps = race.GetValidLaps(pilotChannel.Pilot, true);
-                foreach (Lap l in laps)
+                if (sector > 0)
                 {
-                    DateTime time = l.Detection.Time;
-
-                    string lapNumber = "L" + l.Number.ToString();
-                    if (l.Number == 0)
+                    foreach (SectorTime sectorTime in race.GetSectorTimes(pilotChannel.Pilot, splitTimingSystems, sector))
                     {
-                        lapNumber = "HS";
+                        AddTimeMarker(sectorTime.End, tint, "L" + sectorTime.LapNumber + " S" + sector);
                     }
+                }
+                else
+                {
+                    Lap[] laps = race.GetValidLaps(pilotChannel.Pilot, true);
+                    foreach (Lap l in laps)
+                    {
+                        DateTime time = l.Detection.Time;
 
-                    AddTimeMarker(time, tint, lapNumber);
+                        string lapNumber = "L" + l.Number.ToString();
+                        if (l.Number == 0)
+                        {
+                            lapNumber = "HS";
+                        }
+
+                        AddTimeMarker(time, tint, lapNumber);
+                    }
                 }
             }
 

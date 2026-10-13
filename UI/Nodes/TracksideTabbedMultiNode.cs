@@ -54,6 +54,9 @@ namespace UI.Nodes
         private TextButtonNode rssiButton;
         public TextButtonNode PhotoBoothButton { get; private set; }
 
+        // The race ShowReplay is opening, so the race change doesn't show it as well.
+        private Race openingReplay;
+
 
         public TracksideTabbedMultiNode(EventManager eventManager, VideoManager videoManager, SoundManager soundManager, RoundsNode rounds, SceneManagerNode sceneManagerContent, TabButtonsNode tabButtons, KeyboardShortcuts keyMapper)
             : base(TimeSpan.FromSeconds(0.6f), tabButtons)
@@ -111,17 +114,52 @@ namespace UI.Nodes
             AddTab("Lap Records", LapRecordsSummaryNode, ShowTopLaps);
             AddTab("Lap Count", LapCountSummaryNode, ShowLaps);
             AddTab("Points", PointsSummaryNode, ShowPoints);
-            AddTab("Channel List", pilotChanelList, ShowPilotChannelList);
+            TextButtonNode channelListButton = AddTab("Channel List", pilotChanelList, ShowPilotChannelList);
             rssiButton = AddTab("RSSI Analyser", rssiNode, ShowAnalyser);
             PhotoBoothButton = AddTab("Photo Booth", PhotoBooth, ShowPhotoBooth);
-            AddTab("Patreons", patreonsNode, ShowPatreons);
+            TextButtonNode patreonsButton = AddTab("Patreons", patreonsNode, ShowPatreons);
 
             replayButton.Enabled = false;
             PhotoBoothButton.Visible = platformTools.HasFeature(PlatformFeature.Video);
 
             UpdateRSSIVisible();
 
-            ShowPatreons();
+            // Multi-PC review: a review PC just reviews races. Races open as replays rather than live.
+            if (IsReviewPC)
+            {
+                liveButton.Visible = false;
+                channelListButton.Visible = false;
+                PhotoBoothButton.Visible = false;
+                patreonsButton.Visible = false;
+
+                ShowRounds();
+            }
+            else
+            {
+                ShowPatreons();
+            }
+        }
+
+        private bool IsReviewPC { get { return eventManager.MultiPC.IsReviewPC; } }
+
+        // Multi-PC review: shows the open race's replay where the PC running the event would show it live.
+        private void ShowReview()
+        {
+            Race race = eventManager.RaceManager.CurrentRace;
+
+            // ShowReplay is opening it, and shows it itself.
+            if (race != null && race == openingReplay)
+                return;
+
+            // A review PC only opens races that have been run.
+            if (race != null && race.Ended)
+            {
+                ShowReplay(race);
+            }
+            else
+            {
+                ShowRounds();
+            }
         }
 
 
@@ -230,7 +268,11 @@ namespace UI.Nodes
 
         public void ShowRounds(MouseInputEvent mie)
         {
-            eventManager.RoundManager.CheckThereIsOneRound();
+            // A review PC doesn't add rounds.
+            if (!IsReviewPC)
+            {
+                eventManager.RoundManager.CheckThereIsOneRound();
+            }
             //if (mie != null && mie.Button == MouseButtons.Middle)
             //{
             //    BaseGame baseGame = CompositorLayer.Game as BaseGame;
@@ -253,6 +295,10 @@ namespace UI.Nodes
         }
         public void ShowPhotoBooth(MouseInputEvent mie)
         {
+            // Hidden on a review PC, but taking a pilot's photo from the pilot list would still show it.
+            if (IsReviewPC)
+                return;
+
             Show(PhotoBooth);
             PhotoBooth.Load();
         }
@@ -271,12 +317,24 @@ namespace UI.Nodes
 
         public void ShowCommentators()
         {
+            if (IsReviewPC)
+            {
+                ShowReview();
+                return;
+            }
+
             Show(sceneManagerNode);
             sceneManagerNode.ShowCommentators();
         }
 
         public void ShowLive(SceneManagerNode.Scenes scene)
         {
+            if (IsReviewPC)
+            {
+                ShowReview();
+                return;
+            }
+
             sceneManagerNode.SetScene(scene);
             Show(sceneManagerNode);
         }
@@ -304,6 +362,13 @@ namespace UI.Nodes
 
         public void ShowLive()
         {
+            // e.g. when a race is opened.
+            if (IsReviewPC)
+            {
+                ShowReview();
+                return;
+            }
+
             if (!eventManager.RaceManager.HasPilots)
             {
                 sceneManagerNode.SetScene(SceneManagerNode.Scenes.PreRace, true);
@@ -339,7 +404,13 @@ namespace UI.Nodes
             {
                 if (eventManager.RaceManager.CurrentRace != race)
                 {
-                    eventManager.RaceManager.SetRace(race);
+                    // Not if it's locked out (open on another PC). Laps added in the replay go to the current race.
+                    openingReplay = race;
+                    bool opened = eventManager.RaceManager.SetRace(race);
+                    openingReplay = null;
+
+                    if (!opened)
+                        return;
                 }
 
                 Show(ReplayNode);

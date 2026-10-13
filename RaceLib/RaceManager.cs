@@ -18,7 +18,18 @@ namespace RaceLib
     {
         public TimingSystemManager TimingSystemManager { get; private set; }
 
-        public Race CurrentRace { get; private set; }
+        private Race currentRaceObj;
+        public Race CurrentRace
+        {
+            get { return currentRaceObj; }
+            private set
+            {
+                currentRaceObj = value;
+
+                // Multi-PC review locks the race this PC has open.
+                EventManager.MultiPC.SetOpenRace(value);
+            }
+        }
 
         public event Action<Detection> OnSplitDetection;
 
@@ -49,6 +60,9 @@ namespace RaceLib
         public event Action<Race, Pilot> OnPilotHandicapStart;
 
         public event Race.OnRaceEvent OnRaceRemoved;
+
+        // Multi-PC review: another PC saved the race and it's been reloaded (or added, if it's new).
+        public event Race.OnRaceEvent OnRaceReloaded;
 
         public event PilotChannelDelegate OnPilotAdded;
         public event PilotChannelDelegate OnPilotRemoved;
@@ -400,6 +414,10 @@ namespace RaceLib
         public bool AddPilot(Channel channel, Pilot p)
         {
             Logger.RaceLog.LogCall(this, channel, p);
+
+            // Multi-PC review: e.g. clicking a pilot in the pilot list, which would make a new race.
+            if (!EventManager.MultiPC.CanChangeRaces())
+                return false;
 
             Race currentRace = CurrentRace;
 
@@ -1093,24 +1111,43 @@ namespace RaceLib
                             race.TargetLaps = EventManager.Event.Laps;
                         }
 
-                        foreach (Lap lap in race.Laps)
-                        {
-                            // When loading, we need to set the race object reference onto each Lap for performance quick access reasons.
-                            lap.Race = race;
-
-                            // Same with detections...
-                            if (lap.Detection != null)
-                            {
-                                Detection d = race.Detections.FirstOrDefault(da => da.ID == lap.Detection.ID);
-                                if (d != null)
-                                {
-                                    lap.Detection = d;
-                                }
-                            }
-                        }
+                        // When loading, we need to set the race object reference onto each Lap for performance quick access reasons. Same with detections.
+                        race.LinkLaps();
                     }
                 }
             }
+        }
+
+        // Multi-PC review: takes on a race as another PC saved it, updating the race in memory or adding it if it's new.
+        public Race ApplyReloadedRace(Race saved)
+        {
+            saved.Event = EventManager.Event;
+            saved.Round = EventManager.RoundManager.SyncRound(saved.Round);
+
+            if (saved.TargetLaps == 0)
+            {
+                saved.TargetLaps = EventManager.Event.Laps;
+            }
+
+            Race race = GetRaceByRaceId(saved.ID);
+            if (race == null)
+            {
+                race = saved;
+                LoadRaces(new Race[] { race });
+            }
+            else
+            {
+                race.CopySavedState(saved);
+            }
+
+            OnRaceReloaded?.Invoke(race);
+
+            // So whatever's showing its laps catches up.
+            if (race == CurrentRace)
+            {
+                OnLapsRecalculated?.Invoke(race);
+            }
+            return race;
         }
 
         public void RemoveRace(Race remove, bool canRemoveEmptyRound)
@@ -1183,6 +1220,12 @@ namespace RaceLib
         public bool SetRace(Race race)
         {
             Logger.RaceLog.LogCall(this, race);
+
+            // Multi-PC review: a race open on another PC is locked out.
+            if (race != null && race != CurrentRace && !EventManager.MultiPC.CanOpen(race))
+            {
+                return false;
+            }
 
             Race currentRace = CurrentRace;
 
@@ -1565,6 +1608,61 @@ namespace RaceLib
             Channel c = race.GetChannel(pilot);
             EventManager.RaceManager.AddLap(new Detection(TimingSystemType.Manual, 0, pilot, c, time, lapNumber, true, 0));
             EventManager.RaceManager.RecalcuateLaps(pilot, race);
+        }
+
+        // The timing systems that end each sector but the last, which ends with the lap. From every race's split
+        // times as well as the split timing set up here, so it's the same for each race and holds on a PC without
+        // the timing systems (e.g. one reviewing races). Without split timing there's still one, where the first
+        // split timing system would be, so sector times can be added by hand.
+        public int[] GetSplitTimingSystems()
+        {
+            IEnumerable<int> timingSystems = TimingSystemManager.SplitSystems.Select(t => TimingSystemManager.GetIndex(t));
+            foreach (Race race in GetRacesCopyIncludingInvalid())
+            {
+                timingSystems = timingSystems.Concat(race.GetSplitTimingSystems());
+            }
+
+            int[] splitTimingSystems = timingSystems.Distinct().OrderBy(i => i).ToArray();
+            if (!splitTimingSystems.Any())
+            {
+                return new int[] { Math.Max(1, TimingSystemManager.PrimeSystems.Length) };
+            }
+
+            return splitTimingSystems;
+        }
+
+        // Adds a sector time ending now, e.g. at the current point of a replay. See Race.GetSectorTimes.
+        public void AddManualSectorWithRace(Race race, Pilot pilot, DateTime time, int sector)
+        {
+            Logger.RaceLog.LogCall(this, race, pilot, time, sector);
+
+            int[] timingSystems = GetSplitTimingSystems();
+
+            // The last sector ends with the lap.
+            if (sector > timingSystems.Length)
+            {
+                AddManualLapWithRace(race, pilot, time, 0);
+                return;
+            }
+
+            Channel c = race.GetChannel(pilot);
+            Detection detection = new Detection(TimingSystemType.Manual, timingSystems[sector - 1], pilot, c, time, 0, false, 0);
+            lock (race.Detections)
+            {
+                race.Detections.Add(detection);
+            }
+
+            // Gives it its lap number, and saves it.
+            RecalcuateLaps(pilot, race);
+        }
+
+        // e.g. moving a sector time to where the pilot is seen crossing the gate in a replay.
+        public void SetDetectionTime(Race race, Detection detection, DateTime time)
+        {
+            Logger.RaceLog.LogCall(this, race, detection, time);
+
+            detection.Time = time;
+            RecalcuateLaps(detection.Pilot, race);
         }
 
         public void AddManualLap(Pilot pilot, DateTime time)
@@ -2180,6 +2278,20 @@ namespace RaceLib
             else
             {
                 SetDetectionValidity(split.Race, split.Detection, false, validityType);
+            }
+        }
+
+        public void DisqualifySectorTime(SectorTime sectorTime)
+        {
+            // The last sector ends with the lap, so goes with it.
+            Lap lap = sectorTime.Race.GetLaps(l => l.Detection == sectorTime.Detection).FirstOrDefault();
+            if (lap != null)
+            {
+                DisqualifyLap(lap);
+            }
+            else
+            {
+                SetDetectionValidity(sectorTime.Race, sectorTime.Detection, false);
             }
         }
 

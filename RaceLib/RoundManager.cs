@@ -46,6 +46,11 @@ namespace RaceLib
 
         private void OnRaceResultsChange(Race race)
         {
+            // Multi-PC review: only the PC running the event generates rounds. It does so when it
+            // reloads a race whose results were changed on a review PC.
+            if (EventManager.MultiPC.IsReviewPC)
+                return;
+
             if (SheetFormatManager != null)
             {
                 // Let the sheet manager handle sheet-backed stages.
@@ -92,6 +97,37 @@ namespace RaceLib
                     }
                 }
             }
+        }
+
+        // Multi-PC review: a race reloaded from disk comes with its own copy of its round. Use the one
+        // in memory, adding the round if it's new (created on another PC).
+        public Round SyncRound(Round loaded)
+        {
+            if (loaded == null)
+                return null;
+
+            Round round;
+            lock (Event.Rounds)
+            {
+                round = Event.Rounds.FirstOrDefault(r => r == loaded);
+                if (round != null)
+                    return round;
+
+                round = loaded;
+
+                int index = Event.Rounds.FindIndex(r => r.Order > round.Order);
+                if (index < 0)
+                {
+                    Event.Rounds.Add(round);
+                }
+                else
+                {
+                    Event.Rounds.Insert(index, round);
+                }
+            }
+
+            OnRoundAdded?.Invoke(round);
+            return round;
         }
 
         public Round NextRound(Round round)

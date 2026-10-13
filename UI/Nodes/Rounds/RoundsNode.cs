@@ -82,8 +82,10 @@ namespace UI.Nodes.Rounds
             EventManager.RaceManager.OnRacePilotsSet += UpdateRace;
             EventManager.RaceManager.OnRaceRemoved += Refresh;
             EventManager.RaceManager.OnRaceCreated += Refresh;
+            EventManager.RaceManager.OnRaceReloaded += Refresh;
             EventManager.ResultManager.RaceResultsChanged += Refresh;
             EventManager.OnPilotRefresh += Refresh;
+            EventManager.MultiPC.OnPeersChanged += Refresh;
 
             filterButton = new TextButtonNode("Stage Filter", Color.Transparent, Theme.Current.Hover.XNA, Theme.Current.Rounds.Text.XNA);
             filterButton.RelativeBounds = new RectangleF(0.94f, 0.96f, 0.05f, 0.03f);
@@ -106,7 +108,9 @@ namespace UI.Nodes.Rounds
             EventManager.RaceManager.OnRacePilotsSet -= UpdateRace;
             EventManager.RaceManager.OnRaceRemoved -= Refresh;
             EventManager.RaceManager.OnRaceCreated -= Refresh;
+            EventManager.RaceManager.OnRaceReloaded -= Refresh;
             EventManager.OnPilotRefresh -= Refresh;
+            EventManager.MultiPC.OnPeersChanged -= Refresh;
 
             if (Syncer != null)
             {

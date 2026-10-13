@@ -14,6 +14,7 @@
       - [End of Lap](#end-of-lap)
       - [Holeshot](#holeshot)
     - [Smart Minimum lap time](#smart-minimum-lap-time)
+    - [Review races on other PCs](#review-races-on-other-pcs)
 - [Main Screen](#main-screen)
   - [Quick functions](#quick-functions)
   - [Timing Settings](#timing-settings)
@@ -89,6 +90,7 @@
     - [Splitting laps](#splitting-laps)
     - [Adding laps](#adding-laps)
     - [Editing laps / Undisqualifying laps](#editing-laps-undisqualifying-laps)
+    - [Sector times](#sector-times)
   - [Replay / Video recording](#replay-video-recording)
     - [Shortcut Keys](#shortcut-keys)
     - [Editing Laps](#editing-laps)
@@ -226,6 +228,22 @@ So the main things to be aware of
 - It only removes the clear false reads.
 - It can’t invalidate the last lap or change final positioning.
 - Leaves big decisions to the Race Director
+
+
+### Review races on other PCs
+
+At bigger events a second PC can review races (watch replays, add, remove and edit laps) while the main PC keeps running the event. Both PCs need to use the same events directory, e.g. share the main PC's events directory on the network and point the review PC's event storage location (Application Settings, Data) at it.
+
+- Tick **Review races on other PCs** on the event. Open it on the main PC with **Open** as usual, and on the review PC select it and press **Review**.
+- A race that's open on one PC is locked out on the other, and shows as "(open on PC-NAME)" in the Rounds view. Opening another race releases it.
+- Changes made on the other PC are picked up a few seconds after it moves off the race. The main PC then recalculates and saves the results, and generates any rounds that depend on them.
+- A PC never saves over a race that's been changed on another PC since it loaded it. If that happens you're told, and the race is reloaded with the other PC's changes.
+- The review PC has no Live, Channel List, Photo Booth or Patreons tabs. Clicking a race opens its replay, and only races that have been run can be opened, so it never holds up the next race.
+- The review PC can't change the schedule. It can't add, remove or rearrange rounds, stages or races, add pilots to races or change the event's pilots, start races or change the event settings. Laps, results and the pilots of races that have been run can still be corrected.
+- The review PC doesn't clean up old recordings, so it can't delete the main PC's.
+- The status list on the right shows CTRL (running the event) or REV (reviewing) and the other PC it's connected to.
+
+Turn it on before opening the event on either PC, as it takes effect when the event is opened.
 
 # Main Screen
 
@@ -769,6 +787,13 @@ At any point you can right click the lap bar and go into the edit laps menu. In 
 You can also edit the times of laps by clicking on the lap and adjusting the time. Keep in mind the lap after the adjusted lap will also change in length, in the opposite direction.
 
 
+### Sector times
+
+Each lap is divided into sectors: sector 1 runs from the start of the lap to the first split timing system, sector 2 to the next, and the last sector to the end of the lap. The edit laps menu has a dropdown at the top right to switch between the laps and each sector. Each sector's times can be edited and disqualified in the same way as laps. Moving a split time changes the sector after it too, and the last sector's times are the ends of the laps, so changing one changes its lap.
+
+The sectors are the same in every race of the event. They come from the split timing systems set up and the split times in all of the event's races, so they're still there on a PC reviewing races without the timing systems, or in a race a split timing system missed. Without any split timing there are still two sectors, divided where the first split timing system would be, so sector times can be added by hand in the replay (see [Editing Laps](#editing-laps) under Replay).
+
+
 ## Replay / Video recording
 
 Video recording can be enabled in general settings. Quick warning though it uses a lot of cpu time and you need a very powerful machine to be able to record and stream with OBS at the same time.
@@ -797,6 +822,8 @@ Leftarrow - Step backwards 5 seconds
 ### Editing Laps
 
 So all the normal lap editing functions work here in Replay as well. With the important extra feature of laps added Manually will be added at the current video time. So if a pilot's lap was missed by the timing system you can find the frame they crossed the line and add the lap then.
+
+The dropdown next to Slow on the seek bar switches the pilots' times and the seek bar markers between the laps and a sector. Right clicking a pilot's sector times then lets you add a time for that sector at the current video time, move a time to the current video time, seek to it or disqualify it. This works even when a race has no times for the sector yet, so they can be added by finding the frame the pilot passes the sector's gate. Picking a sector in the edit laps menu switches the replay to it too.
 
 
 ## Round Generation

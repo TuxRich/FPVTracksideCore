@@ -115,6 +115,9 @@ namespace UI.Nodes.Rounds
             AddRoundButton.OnClick += AddRoundButton_OnClick;
             buttonContainer.AddChild(AddRoundButton);
 
+            RemoveRoundButton.Visible = CanEditRounds;
+            AddRoundButton.Visible = CanEditRounds;
+
             contentContainer = new Node();
             contentContainer.RelativeBounds = new RectangleF(0, subHeading.RelativeBounds.Bottom, 1, 1 - subHeading.RelativeBounds.Bottom);
             panel.Inner.AddChild(contentContainer);
@@ -122,6 +125,9 @@ namespace UI.Nodes.Rounds
 
             shadow = new ShadowNode();
         }
+
+        // Multi-PC review: a review PC reviews races. It doesn't add, remove or rearrange rounds, stages or races.
+        protected bool CanEditRounds { get { return !EventManager.MultiPC.IsReviewPC; } }
 
         public virtual bool IsRoundInStage()
         {

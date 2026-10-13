@@ -39,6 +39,9 @@ namespace UI
 
         private bool hasEverShownEventSelector;
 
+        // Multi-PC review: the event was opened to review races, so restarts reopen it the same way.
+        private bool openedForReview;
+
         public Texture2D Banner { get; protected set; }
 
         public WorkQueue Background { get; private set; }
@@ -338,7 +341,7 @@ namespace UI
             if (selected == null)
                 return;
 
-            StartEvent(selected.ID, editor.Profile);
+            StartEvent(selected.ID, editor.Profile, editor.OpenForReview);
         }
 
         public void Restart(Event evvent)
@@ -357,7 +360,7 @@ namespace UI
                             if (eventSelectorLayer != null)
                             {
                                 eventSelectorLayer.Dispose();
-                                StartEvent(evvent.ID, eventSelectorLayer.Editor.Profile);
+                                StartEvent(evvent.ID, eventSelectorLayer.Editor.Profile, openedForReview);
                             }
                         });
                     }
@@ -371,8 +374,10 @@ namespace UI
         }
 
 
-        private void StartEvent(Guid eventId, Profile profile)
+        private void StartEvent(Guid eventId, Profile profile, bool review)
         {
+            openedForReview = review;
+
             loadingLayer.BlockOnLoading = true;
 
             BackgroundLayer backgroundLayer = LayerStack.GetLayer<BackgroundLayer>();
@@ -385,6 +390,15 @@ namespace UI
 
             // Load races BEFORE sync. Sync systems need to assume this..
             eventManager.LoadRaces(startEventWorkSet, loadingLayer.WorkQueue);
+
+            loadingLayer.WorkQueue.Enqueue(startEventWorkSet, "Starting Multi-PC Review", () =>
+            {
+                if (eventManager.Event.MultiPCReview)
+                {
+                    DirectoryInfo eventDirectory = new DirectoryInfo(Path.Combine(ApplicationProfileSettings.Instance.EventStorageDirectory.FullName, eventId.ToString()));
+                    eventManager.MultiPC.Start(eventDirectory, review ? MultiPCRoles.Review : MultiPCRoles.RaceControl);
+                }
+            });
 
             loadingLayer.WorkQueue.Enqueue(startEventWorkSet, "On Start Event", () =>
             {
@@ -427,6 +441,10 @@ namespace UI
 
             loadingLayer.WorkQueue.Enqueue(startEventWorkSet, "Cleaning up old video files", () =>
             {
+                // A review PC shares the events directory with the PC running the event, and mustn't delete its recordings.
+                if (eventManager.MultiPC.IsReviewPC)
+                    return;
+
                 try
                 {
                     eventLayer?.VideoCheckFileCount();

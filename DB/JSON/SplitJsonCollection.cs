@@ -148,7 +148,9 @@ namespace DB.JSON
 
                 allWritten += jsonIO.Write(filename, except);
             }
-            return allWritten - exceptCount == objs.Count();
+
+            // Every file was rewritten with what's left in it.
+            return allWritten == exceptCount;
         }
 
         public IEnumerable<T> All()

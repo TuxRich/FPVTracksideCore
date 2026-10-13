@@ -91,17 +91,23 @@ namespace UI.Nodes.Rounds
 
         public virtual void MakeMenu(MouseMenu mm)
         {
-            mm.AddItem("Edit Settings", EditSettings);
-            if (StageNode != null)     
-                mm.AddItem("Edit Stage", StageNode.EditStage);
+            if (CanEditRounds)
+            {
+                mm.AddItem("Edit Settings", EditSettings);
+                if (StageNode != null)
+                    mm.AddItem("Edit Stage", StageNode.EditStage);
+            }
             mm.AddItem("Copy to Clipboard", CopyToClipboard);
 
             FileTools.ExportMenu(mm, "Export", PlatformTools, "Save", MakeTable(), GetLayer<PopupLayer>());
 
             int exportDecimalPlaces = ApplicationProfileSettings.Instance.ExportDecimalPlaces;
             FileTools.ExportMenu(mm, "Export Raw Laps", PlatformTools, "Save Top Consecutive Laps", EventManager.RaceManager.GetRawLaps(Round?.Stage, exportDecimalPlaces), GetLayer<PopupLayer>());
-               
-            mm.AddItemConfirm("Re-calculate", Recalculate);
+
+            if (CanEditRounds)
+            {
+                mm.AddItemConfirm("Re-calculate", Recalculate);
+            }
         }
 
 
@@ -313,7 +319,10 @@ namespace UI.Nodes.Rounds
                 MouseMenu mouseMenu = new MouseMenu(this);
                 mouseMenu.AddItem("Copy Pilots", CopyToClipboard);
 
-                mouseMenu.AddItem("Edit Stage", StageNode.EditStage);
+                if (CanEditRounds)
+                {
+                    mouseMenu.AddItem("Edit Stage", StageNode.EditStage);
+                }
 
                 foreach (EventPilotNode pilotResultNode in PilotNodes)
                 {

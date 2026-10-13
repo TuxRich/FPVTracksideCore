@@ -124,6 +124,8 @@ namespace RaceLib
 
         public string TimeZone { get; set; }
 
+        public bool MultiPCReview { get; set; }
+
         public Event()
         {
             SyncWithFPVTrackside = false;
@@ -180,6 +182,7 @@ namespace RaceLib
             newEvent.Channels = this.Channels.ToArray();
 
             newEvent.MinLapTime = this.MinLapTime;
+            newEvent.MultiPCReview = this.MultiPCReview;
 
             return newEvent;
         }
@@ -295,6 +298,10 @@ namespace RaceLib
         [Category("Cloud")]
         [DisplayName("Sync with MultiGP")]
         public bool SyncWithMultiGP { get; set; }
+
+        [Category("Multi-PC")]
+        [DisplayName("Review races on other PCs")]
+        public bool MultiPCReview { get; set; }
 
         [System.ComponentModel.Browsable(false)]
         public int ExternalID { get; set; }

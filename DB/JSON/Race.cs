@@ -38,6 +38,10 @@ namespace DB.JSON
 
         public string Bracket { get; set; }
 
+        // Multi-PC review: bumped on every save, so a PC can tell when another PC has saved the race since it loaded it.
+        public int Revision { get; set; }
+        public string SavedBy { get; set; }
+
         public Race() { }
 
         public Race(RaceLib.Race obj)

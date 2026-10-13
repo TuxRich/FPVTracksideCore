@@ -162,6 +162,22 @@ namespace DB.JSON
         {
             return Results.All().Convert(this);
         }
+
+        bool ICollectionDatabase.GetSavedRaceRevision(Guid raceId, out int revision, out string savedBy)
+        {
+            // Reads the raw race, skipping the conversion (laps, pilots, the event...) a full load does.
+            Race saved = Races.GetObject(raceId);
+            if (saved == null)
+            {
+                revision = 0;
+                savedBy = null;
+                return false;
+            }
+
+            revision = saved.Revision;
+            savedBy = saved.SavedBy;
+            return true;
+        }
     }
 
 

@@ -22,6 +22,8 @@ namespace UI.Nodes
         public bool IsOnLive { get { return sceneManagerNode == Showing; } }
         public bool IsOnRounds { get { return rounds == Showing; } }
         public bool IsOnReplay { get { return ReplayNode == Showing; } }
+        public bool ReplayAvailable { get { return replayButton.Enabled; } }
+        public bool RSSIAvailable { get { return rssiButton.Visible; } }
         public bool IsOnChanelList { get { return pilotChanelList == Showing; } }
         public bool IsOnLapCount { get { return LapCountSummaryNode == Showing; } }
         public bool IsOnLapRecords { get { return LapRecordsSummaryNode == Showing; } }
@@ -196,6 +198,11 @@ namespace UI.Nodes
 
         public void ShowAnalyser(MouseInputEvent mie)
         {
+            ShowAnalyser();
+        }
+
+        public void ShowAnalyser()
+        {
             Show(rssiNode);
 
             if (!eventManager.RaceManager.RaceRunning)
@@ -223,6 +230,10 @@ namespace UI.Nodes
 
         public void ShowPatreons()
         {
+            // Hidden on a review PC, as are its keyboard shortcuts' tabs.
+            if (IsReviewPC)
+                return;
+
             Show(patreonsNode);
             patreonsNode.Refresh();
         }
@@ -272,6 +283,22 @@ namespace UI.Nodes
             Show(LapCountSummaryNode);
         }
 
+        // For the keyboard shortcuts. This fork has a tab for each, where upstream has one Results tab.
+        public void ShowLapRecords()
+        {
+            ShowTopLaps(null);
+        }
+
+        public void ShowLapCount()
+        {
+            ShowLaps(null);
+        }
+
+        public void ShowPoints()
+        {
+            ShowPoints(null);
+        }
+
         public void ShowFinalResults(MouseInputEvent mie)
         {
             FinalResultsNode.Refresh();
@@ -307,6 +334,11 @@ namespace UI.Nodes
         }
         public void ShowPhotoBooth(MouseInputEvent mie)
         {
+            ShowPhotoBooth();
+        }
+
+        public void ShowPhotoBooth()
+        {
             // Hidden on a review PC, but taking a pilot's photo from the pilot list would still show it.
             if (IsReviewPC)
                 return;
@@ -317,6 +349,14 @@ namespace UI.Nodes
 
         public void ShowPilotChannelList(MouseInputEvent mie)
         {
+            ShowPilotChannelList();
+        }
+
+        public void ShowPilotChannelList()
+        {
+            if (IsReviewPC)
+                return;
+
             //if (mie != null && mie.Button == MouseButtons.Middle)
             //{
             //    BaseGame baseGame = CompositorLayer.Game as BaseGame;
@@ -325,6 +365,11 @@ namespace UI.Nodes
             //}
 
             Show(pilotChanelList);
+        }
+
+        // Upstream's Track tab is in its FPVTrackside project, which overrides this. This fork has none.
+        public virtual void ShowTrack()
+        {
         }
 
         public void ShowCommentators()

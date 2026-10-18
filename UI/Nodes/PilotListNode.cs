@@ -213,7 +213,7 @@ namespace UI.Nodes
 
                     if (canEditEvent)
                     {
-                        mm.AddItem("Remove " + pilot.Name + " from event", () =>
+                        mm.AddItem(Translator.Format("Menu.RemovePilotFromEvent", "Remove {0} from event", pilot.Name), () =>
                         {
                             eventManager.RemovePilot(pilot);
                         });

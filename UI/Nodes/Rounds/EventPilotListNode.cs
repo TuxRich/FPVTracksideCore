@@ -282,7 +282,7 @@ namespace UI.Nodes.Rounds
             int races = (int)Math.Ceiling(pilots.Length / (float)perRace);
             int spots = races * perRace;
 
-            addRound.AddItem("Top " + perRace, () =>
+            addRound.AddItem(Translator.Format("Menu.TopPilots", "Top {0}", perRace), () =>
             {
                 EventManager.RoundManager.GenerateTopX(Round, pilots.Take(perRace));
                 Refresh();
@@ -291,7 +291,7 @@ namespace UI.Nodes.Rounds
             for (int i = perRace * 2; i <= spots; i += perRace)
             {
                 int c = i;
-                addRound.AddItem("Ordered Top " + c, () =>
+                addRound.AddItem(Translator.Format("Menu.OrderedTopPilots", "Ordered Top {0}", c), () =>
                 {
                     EventManager.RoundManager.GenerateTopX(Round, pilots.Take(c));
                     Refresh();
@@ -302,7 +302,7 @@ namespace UI.Nodes.Rounds
             for (int i = perRace * 2; i <= spots; i += perRace)
             {
                 int c = i;
-                addRound.AddItem("Seeded Top " + c, () =>
+                addRound.AddItem(Translator.Format("Menu.SeededTopPilots", "Seeded Top {0}", c), () =>
                 {
                     EventManager.RoundManager.GenerateSeededX(Round, pilots.Take(c));
                     Refresh();

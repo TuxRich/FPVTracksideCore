@@ -190,7 +190,7 @@ namespace UI.Nodes.Rounds
                         foreach (var external in EventManager.ExternalRaceProviders)
                         {
                             var t = external;
-                            rootMenu.AddItem("Add " + external.Name, () => { t.TriggerCreateRaces(Round); });
+                            rootMenu.AddItem(Translator.Format("Menu.AddFromProvider", "Add {0}", external.Name), () => { t.TriggerCreateRaces(Round); });
                         }
                     }
                 }
@@ -217,7 +217,7 @@ namespace UI.Nodes.Rounds
                     foreach (var external in EventManager.ExternalRaceProviders)
                     {
                         var t = external;
-                        rootMenu.AddItem("Add " + external.Name, () => { t.TriggerCreateRaces(Round); });
+                        rootMenu.AddItem(Translator.Format("Menu.AddFromProvider", "Add {0}", external.Name), () => { t.TriggerCreateRaces(Round); });
                     }
                 }
             }
@@ -292,7 +292,7 @@ namespace UI.Nodes.Rounds
 
                 if (stage.GeneratesRounds)
                 {
-                    addRound.AddItem("Continue " + stage.Name, ContinueStageRound);
+                    addRound.AddItem(Translator.Format("Menu.ContinueStage", "Continue {0}", stage.Name), ContinueStageRound);
                     addRound.AddBlank();
                 }
             }

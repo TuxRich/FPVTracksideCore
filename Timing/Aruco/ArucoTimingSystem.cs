@@ -214,6 +214,14 @@ namespace Timing.Aruco
             return true;
         }
 
+        public void OnConnected(bool raceRunning)
+        {
+            if (!raceRunning)
+            {
+                EndDetection(EndDetectionType.Normal);
+            }
+        }
+
         public bool EndDetection(EndDetectionType type)
         {
             detecting = false;

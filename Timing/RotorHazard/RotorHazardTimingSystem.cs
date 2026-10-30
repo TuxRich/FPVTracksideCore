@@ -116,10 +116,13 @@ namespace Timing.RotorHazard
                     if (connectionCount > 10)
                         yield return new StatusItem() { StatusOK = false, Value = connectionCount.ToString("0") + " disc" };
 
+                    // The server info comes after connecting, and may not have a version. This is shown every frame, so
+                    // it mustn't throw.
                     int len = 5;
-                    if (ServerInfo.release_version.Length > len)
+                    string releaseVersion = ServerInfo.release_version;
+                    if (releaseVersion != null && releaseVersion.Length > len)
                     {
-                        yield return new StatusItem() { StatusOK = true, Value = "V" + ServerInfo.release_version.Substring(0, len) };
+                        yield return new StatusItem() { StatusOK = true, Value = "V" + releaseVersion.Substring(0, len) };
                     }
 
                 }

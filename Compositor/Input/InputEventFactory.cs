@@ -157,7 +157,8 @@ namespace Composition.Input
                 }
                 catch (Exception ex)
                 {
-                    Tools.Logger.CrashLogger?.Log(ex);
+                    // Not the crash log, which is for what ends the app, and isn't limited in size.
+                    Tools.Logger.Input?.LogException(this, ex);
                 }
             }
         }

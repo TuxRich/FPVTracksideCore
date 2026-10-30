@@ -73,17 +73,10 @@ namespace Sound
         {
             StopSpeech();
 
-            if (speaker != null)
-            {
-                lock (speaker)
-                {
-                    if (speaker != null)
-                    {
-                        speaker.Dispose();
-                        speaker = null;
-                    }
-                }
-            }
+            // Not locking on the speaker, which the speech thread can replace (see ResetSpeaker).
+            ISpeaker current = speaker;
+            speaker = null;
+            current?.Dispose();
         }
         public bool HasSpeech()
         {
@@ -98,9 +91,16 @@ namespace Sound
         public void StopSpeech()
         {
             ttsQueue?.Clear();
-            if (speaker != null)
+
+            // The speaker can be replaced on the speech thread (see ResetSpeaker).
+            ISpeaker current = speaker;
+            try
             {
-                speaker.Stop();
+                current?.Stop();
+            }
+            catch (Exception e)
+            {
+                Logger.SoundLog.LogException(this, e);
             }
         }
 
@@ -137,14 +137,24 @@ namespace Sound
                 speaker = platformTools.CreateSpeaker(Voice);
             }
 
-            if (speaker == null)
+            ISpeaker current = speaker;
+            if (current == null)
                 return;
 
-            speaker.SetRate(Math.Max(-10, Math.Min(10, request.Rate)));
+            try
+            {
+                current.SetRate(Math.Max(-10, Math.Min(10, request.Rate)));
 
-            float factorVolume = (request.Volume / 100.0f) * (Volume / 100.0f);
+                float factorVolume = (request.Volume / 100.0f) * (Volume / 100.0f);
 
-            speaker.SetVolume(Math.Clamp((int)(factorVolume * 100), 0, 100));
+                current.SetVolume(Math.Clamp((int)(factorVolume * 100), 0, 100));
+            }
+            catch (Exception ex)
+            {
+                Logger.SoundLog.LogException(this, ex);
+                ResetSpeaker(current);
+                return;
+            }
 
             SoundWorkItem[] soundWorkItems = ttsQueue.WorkItems.OfType<SoundWorkItem>().ToArray();
 
@@ -166,7 +176,7 @@ namespace Sound
                         if (!string.IsNullOrEmpty(text))
                         {
                             OnSpeech?.Invoke(displayText);
-                            speaker.Speak(text);
+                            current.Speak(text);
                         }
                     }
                 }
@@ -176,8 +186,26 @@ namespace Sound
                 catch (Exception ex)
                 {
                     Logger.SoundLog.LogException(this, ex);
+                    ResetSpeaker(current);
                 }
                 request.OnFinish?.Invoke();
+            }
+        }
+
+        // A speaker that's failed, e.g. because its audio device went away, keeps failing, so the next speech makes a new one.
+        private void ResetSpeaker(ISpeaker failed)
+        {
+            if (speaker != failed)
+                return;
+
+            speaker = null;
+            try
+            {
+                failed.Dispose();
+            }
+            catch (Exception e)
+            {
+                Logger.SoundLog.LogException(this, e);
             }
         }
     }

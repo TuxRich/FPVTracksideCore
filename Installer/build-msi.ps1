@@ -42,7 +42,15 @@ if (-not (Test-Path (Join-Path $stage 'GMFBridge.msi')))
     else { Write-Warning 'GMFBridge.msi was not found, so the installer is without it.' }
 }
 
-$version = (Get-Item (Join-Path $stage $exeName)).VersionInfo.FileVersion
+$versionInfo = (Get-Item (Join-Path $stage $exeName)).VersionInfo
+
+# The installer's version has to be numbers, e.g. 2.78.0.906. The app's informational version, e.g.
+# 2.78.0.906-BIRD+9f1dedb747, has the label of a build that isn't an official release (see Directory.Build.targets),
+# which goes in the installer's name and the name it's listed by in installed apps.
+$version = $versionInfo.FileVersion
+$labelledVersion = $versionInfo.ProductVersion.Split('+')[0]
+$productName = 'FPVTrackside'
+if ($labelledVersion -match '-(.+)$') { $productName += ' ' + $Matches[1] }
 
 # WiX Toolset 3.14, from NuGet.
 $packages = $env:NUGET_PACKAGES
@@ -76,13 +84,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Harvesting the files failed.' }
 foreach ($source in (Join-Path $PSScriptRoot 'Product.wxs'), (Join-Path $wixObj 'AppFiles.wxs'))
 {
     $compiled = Join-Path $wixObj ([IO.Path]::GetFileNameWithoutExtension($source) + '.wixobj')
-    & (Join-Path $wix 'candle.exe') -nologo "-dVersion=$version" "-dSourceDir=$stage" "-dExeName=$exeName" -out $compiled $source
+    & (Join-Path $wix 'candle.exe') -nologo "-dVersion=$version" "-dProductName=$productName" "-dSourceDir=$stage" "-dExeName=$exeName" -out $compiled $source
     if ($LASTEXITCODE -ne 0) { throw "Compiling $source failed." }
 }
 
 # These checks want everything installed to the user's profile to have a registry key path, and each of its
 # folders removed by name on uninstall. Like the releases' installer, this doesn't.
-$msi = Join-Path $bin "FPVTrackside $version.msi"
+$msi = Join-Path $bin "FPVTrackside $labelledVersion.msi"
 & (Join-Path $wix 'light.exe') -nologo -spdb -sice:ICE38 -sice:ICE64 -sice:ICE91 -out $msi (Join-Path $wixObj 'Product.wixobj') (Join-Path $wixObj 'AppFiles.wixobj')
 if ($LASTEXITCODE -ne 0) { throw 'Linking the installer failed.' }
 

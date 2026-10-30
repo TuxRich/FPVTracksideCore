@@ -80,7 +80,7 @@ namespace UI
 
             Content.RootDirectory = "Content";
             IsFixedTimeStep = false;
-            Window.Title = Assembly.GetEntryAssembly().GetName().Name + " - " + Assembly.GetEntryAssembly().GetName().Version;
+            Window.Title = Assembly.GetEntryAssembly().GetName().Name + " - " + AppVersion.Text;
 
             Logger.Init(Log);
 

@@ -158,7 +158,15 @@ namespace WindowsPlatform
             AutoResetEvent autoreset = new AutoResetEvent(false);
             Thread thread = new Thread(() =>
                 {
-                    action();
+                    // An exception on this thread would crash the app, and leave the caller waiting.
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception e)
+                    {
+                        Logger.UI.LogException(e);
+                    }
                     autoreset.Set();
                 });
             thread.Name = "STA Hack";
@@ -177,7 +185,15 @@ namespace WindowsPlatform
             AutoResetEvent autoreset = new AutoResetEvent(false);
             Thread thread = new Thread(() =>
                 {
-                    t = action();
+                    // As in RunAsSTAThread.
+                    try
+                    {
+                        t = action();
+                    }
+                    catch (Exception e)
+                    {
+                        Logger.UI.LogException(e);
+                    }
                     autoreset.Set();
                 });
             thread.Name = "STA Hack";

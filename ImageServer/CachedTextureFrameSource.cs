@@ -159,50 +159,64 @@ namespace ImageServer
             int count = 0;
             while (State == States.Running)
             {
-                if (Reversed)
+                // A failure, e.g. in what handles the frame, shouldn't be able to end this thread, which would crash the app.
+                try
                 {
-                    if (currentIndex >= 1)
+                    PlayBackOne(ref count);
+                }
+                catch (Exception e)
+                {
+                    Tools.Logger.VideoLog.LogException(this, e);
+                    Thread.Sleep(100);
+                }
+            }
+        }
+
+        private void PlayBackOne(ref int count)
+        {
+            if (Reversed)
+            {
+                if (currentIndex >= 1)
+                {
+                    currentIndex--;
+                }
+                else if (BounceRepeat)
+                {
+                    Reversed = false;
+                }
+            }
+            else
+            {
+                if (currentIndex < samples.Count - 1)
+                {
+                    currentIndex++;
+                }
+                else if (Repeat)
+                {
+                    if (BounceRepeat)
                     {
-                        currentIndex--;
+                        Reversed = true;
                     }
-                    else if (BounceRepeat)
+                    else
                     {
-                        Reversed = false;
+                        currentIndex = 0;
                     }
                 }
-                else
+
+                if (playbackFrameSource != null && playbackFrameSource.IsAtEnd)
                 {
-                    if (currentIndex < samples.Count - 1)
-                    {
-                        currentIndex++;
-                    }
-                    else if (Repeat)
-                    {
-                        if (BounceRepeat)
-                        {
-                            Reversed = true;
-                        }
-                        else
-                        {
-                            currentIndex = 0;
-                        }
-                    }
-
-                    if (playbackFrameSource != null && playbackFrameSource.IsAtEnd)
-                    {
-                        frameSource.Dispose();
-                        frameSource = null;
-                    }
+                    frameSource.Dispose();
+                    frameSource = null;
                 }
+            }
 
-                count++;
+            count++;
 
-                if (TicksPerFrame > 0)
-                {
-                    OnFrame(TicksPerFrame * currentIndex, count);
+            if (TicksPerFrame > 0)
+            {
+                OnFrame(TicksPerFrame * currentIndex, count);
 
-                    Thread.Sleep(TimeSpan.FromTicks(TicksPerFrame));
-                }
+                Thread.Sleep(TimeSpan.FromTicks(TicksPerFrame));
             }
         }
 

@@ -458,21 +458,39 @@ namespace Timing
         private void OnMarshallEvent(ITimingSystem timingSystem, MarshalData marshalData)
         {
             Logger.TimingLog.LogCall(this, marshalData.RaceID, marshalData.PilotID);
-            OnDataReceived?.Invoke(timingSystem);
 
-            MarshallEvent?.Invoke(timingSystem, marshalData);
+            // On the timing system's own thread, as with detections.
+            try
+            {
+                OnDataReceived?.Invoke(timingSystem);
+
+                MarshallEvent?.Invoke(timingSystem, marshalData);
+            }
+            catch (Exception e)
+            {
+                Logger.TimingLog.LogException(this, e);
+            }
         }
 
         protected void OnDetectionEvent(ITimingSystem timingSystem, int frequency, DateTime time, int peak)
         {
             Logger.TimingLog.LogCall(this, frequency, time.ToLogFormat(), peak);
 
-            OnDataReceived?.Invoke(timingSystem);
+            // This is on the timing system's own thread, which not all of them protect, and a failure handling the
+            // detection would otherwise end it and crash the app. Logged with the time so the lap can be added by hand.
+            try
+            {
+                OnDataReceived?.Invoke(timingSystem);
 
-            int index = GetIndex(timingSystem);
+                int index = GetIndex(timingSystem);
 
-            bool isLapEnd = timingSystem.Settings.Role == TimingSystemRole.Primary;
-            DetectionEvent?.Invoke(timingSystem.Type, index, frequency, time, isLapEnd, peak);
+                bool isLapEnd = timingSystem.Settings.Role == TimingSystemRole.Primary;
+                DetectionEvent?.Invoke(timingSystem.Type, index, frequency, time, isLapEnd, peak);
+            }
+            catch (Exception e)
+            {
+                Logger.TimingLog.LogException(this, "Detection failed (" + frequency + ", " + time.ToLogFormat() + ")", e);
+            }
         }
 
 

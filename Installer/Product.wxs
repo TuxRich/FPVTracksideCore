@@ -4,10 +4,11 @@
   menu and desktop shortcuts, no setup dialogs, replacing whichever version is installed, older or newer. Its
   upgrade code and component paths match theirs, so a release can be installed over this and this over a release.
 
-  Built by build-msi.ps1, which harvests the published files into the AppFiles component group.
+  Built by build-msi.ps1, which harvests the published files into the AppFiles component group, and names the
+  product with the build's label (e.g. FPVTrackside BIRD) so it isn't mistaken for a release in installed apps.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="*" Name="FPVTrackside" Language="1033" Version="$(var.Version)" Manufacturer="uewepuep" UpgradeCode="F6739AC9-17BE-4D41-B467-3291187040DC">
+  <Product Id="*" Name="$(var.ProductName)" Language="1033" Version="$(var.Version)" Manufacturer="uewepuep" UpgradeCode="F6739AC9-17BE-4D41-B467-3291187040DC">
     <Package InstallerVersion="200" Compressed="yes" InstallScope="perUser" />
 
     <Upgrade Id="F6739AC9-17BE-4D41-B467-3291187040DC">

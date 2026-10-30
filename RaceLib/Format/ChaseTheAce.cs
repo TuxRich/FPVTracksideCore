@@ -25,6 +25,7 @@ namespace RaceLib.Format
 
             Race[] races = RaceManager.GetRaces(Stage).OrderBy(r => r.RoundNumber).ThenBy(r => r.RaceOrder).ToArray();
 
+            // It's first to win Limit times, as in chase_the_ace.lua.
             Dictionary<Pilot, int> wins = new Dictionary<Pilot, int>();
             foreach (Race r in races)
             {
@@ -33,17 +34,23 @@ namespace RaceLib.Format
                     int position = EventManager.ResultManager.GetPosition(r, p);
                     if (position == 1)
                     {
-                        wins.SetValue(p, position);
+                        int won;
+                        wins.TryGetValue(p, out won);
+                        wins[p] = won + 1;
                         break;
                     }
                 }
             }
 
-            int mostWins = wins.Values.Max();
+            // None if no race has a winner, e.g. none had any laps.
+            int mostWins = wins.Values.DefaultIfEmpty(0).Max();
 
             if (mostWins < Limit)
             {
                 Race race = races.LastOrDefault();
+                if (race == null)
+                    yield break;
+
                 Race newRace = race.Clone();
 
                 newRace.Round = newRound;

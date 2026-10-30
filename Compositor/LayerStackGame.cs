@@ -162,29 +162,30 @@ namespace Composition
 
         private void Background()
         {
-            try
+            while (runBackground)
             {
-                while (runBackground)
+                drawSet.WaitOne();
+
+                if (!runBackground)
                 {
-                    drawSet.WaitOne();
+                    break;
+                }
 
-                    if (!runBackground)
-                    {
-                        break;
-                    }
-
+                // A failure here mustn't end the thread, which would crash the app or leave the drawing waiting on it
+                // forever. As with a failed frame, it's logged and the next one goes ahead.
+                try
+                {
                     base.DoBackground();
-
-                    backgroundSet.Set();
+                }
+                catch (Exception ex)
+                {
+                    Tools.Logger.UI.LogException(this, ex);
                 }
 
                 backgroundSet.Set();
             }
-            catch (Exception ex) 
-            {
-                Tools.Logger.CrashLogger.Log(ex);
-                throw;
-            }
+
+            backgroundSet.Set();
         }
 
         protected override bool BeginDraw()

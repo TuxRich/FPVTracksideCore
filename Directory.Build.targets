@@ -1,2 +1,16 @@
 <Project>
+  <!-- Builds from here aren't the official releases, so their version says so: the label goes on the end of the
+       informational version (e.g. 2.78.0.906-BIRD), which the title bar, logs and installer show. The numeric
+       versions, which Windows and the installer compare, are left as Nerdbank.GitVersioning makes them.
+       Empty for no label. -->
+  <PropertyGroup>
+    <BuildLabel>BIRD</BuildLabel>
+  </PropertyGroup>
+
+  <!-- Nerdbank.GitVersioning's informational version is <version>+<commit id>. -->
+  <Target Name="AddBuildLabelToVersion" AfterTargets="GetBuildVersion" Condition=" '$(BuildLabel)' != '' ">
+    <PropertyGroup>
+      <AssemblyInformationalVersion>$(AssemblyInformationalVersion.Replace('+', '-$(BuildLabel)+'))</AssemblyInformationalVersion>
+    </PropertyGroup>
+  </Target>
 </Project>

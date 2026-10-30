@@ -94,9 +94,24 @@ namespace Webb
         {
             while (Running)
             {
-                if (listener == null)
+                try
                 {
-                    CreateListener();
+                    if (listener == null)
+                    {
+                        CreateListener();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // e.g. the port's in use by something else. Tried again in a while rather than over and over.
+                    Logger.HTTP.LogException(this, ex);
+                    AbortListener();
+
+                    for (int i = 0; i < 50 && Running; i++)
+                    {
+                        Thread.Sleep(100);
+                    }
+                    continue;
                 }
 
                 try
@@ -106,10 +121,27 @@ namespace Webb
                 }
                 catch (Exception ex)
                 {
+                    // Stopping aborts the listener.
+                    if (!Running)
+                        break;
+
                     Logger.HTTP.LogException(this, ex);
-                    listener.Abort();
-                    listener = null;
+                    AbortListener();
                 }
+            }
+        }
+
+        private void AbortListener()
+        {
+            HttpListener failed = listener;
+            listener = null;
+            try
+            {
+                failed?.Abort();
+            }
+            catch (Exception e)
+            {
+                Logger.HTTP.LogException(this, e);
             }
         }
 

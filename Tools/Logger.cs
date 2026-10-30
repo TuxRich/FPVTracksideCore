@@ -88,7 +88,39 @@ namespace Tools
 
             CrashLogger = new CrashLogger(logDir);
 
+            if (!lastResortHandlersAdded)
+            {
+                lastResortHandlersAdded = true;
+                AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+                TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+            }
+
             AllLog.LogCall("\n\n\nLog Startup");
+        }
+
+        private static bool lastResortHandlersAdded;
+
+        // An exception nothing caught, e.g. on a background thread, ends the app. This records it first, so it can be found.
+        private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            try
+            {
+                Exception exception = e.ExceptionObject as Exception ?? new Exception(e.ExceptionObject?.ToString());
+                CrashLogger?.Log(exception);
+                AllLog?.LogException("Unhandled exception, closing", exception);
+                AllLog?.Flush();
+            }
+            catch
+            {
+                // Nothing more can be done.
+            }
+        }
+
+        // An exception from a task nothing waited on. It doesn't end the app, but would otherwise go unnoticed.
+        private static void OnUnobservedTaskException(object sender, UnobservedTaskExceptionEventArgs e)
+        {
+            AllLog?.LogException("Unobserved task exception", e.Exception);
+            e.SetObserved();
         }
 
         public static void CleanUp()
@@ -111,7 +143,7 @@ namespace Tools
 
         private List<LogItem> toWrite;
 
-        private Version version;
+        private string version;
 
         private Thread writeThread;
         private bool runWriteThread;
@@ -137,7 +169,7 @@ namespace Tools
         private object fileLocker;
 
         internal Logger(DirectoryInfo directory, string logName, Logger carbonCopy = null)
-            :this(directory, logName, Assembly.GetEntryAssembly().GetName().Version, carbonCopy)
+            :this(directory, logName, AppVersion.Text, carbonCopy)
         {
             WriteToConsole = false;
             fileLocker = new object();
@@ -148,7 +180,7 @@ namespace Tools
             Flush();
         }
 
-        private Logger(DirectoryInfo directory, string logName, Version version, Logger carbonCopy)
+        private Logger(DirectoryInfo directory, string logName, string version, Logger carbonCopy)
         {
             counter = 0;
             LogName = logName;
@@ -319,7 +351,11 @@ namespace Tools
             if (!Enabled)
                 return;
 
-            Log(caller, message + ": " + exception.ToString(), null, LogType.Exception);
+            int repeats;
+            if (!ShouldLogException(caller, message, exception, out repeats))
+                return;
+
+            Log(caller, RepeatsText(repeats) + message + ": " + exception.ToString(), null, LogType.Exception);
         }
 
         public void LogException(object caller, Exception exception)
@@ -327,7 +363,68 @@ namespace Tools
             if (!Enabled)
                 return;
 
-            Log(caller, exception.ToString(), null, LogType.Exception);
+            int repeats;
+            if (!ShouldLogException(caller, null, exception, out repeats))
+                return;
+
+            Log(caller, RepeatsText(repeats) + exception.ToString(), null, LogType.Exception);
+        }
+
+        // The same exception from the same place, e.g. on every frame or every reconnection attempt, is logged in full
+        // once a minute, with how many times it happened in between, so it doesn't flood the log and push out the rest.
+        private static readonly TimeSpan repeatedExceptionInterval = TimeSpan.FromMinutes(1);
+
+        private class RepeatedException
+        {
+            public DateTime LastLogged { get; set; }
+            public int Repeats { get; set; }
+        }
+
+        private Dictionary<string, RepeatedException> repeatedExceptions = new Dictionary<string, RepeatedException>();
+
+        private bool ShouldLogException(object caller, string message, Exception exception, out int repeats)
+        {
+            repeats = 0;
+            if (exception == null)
+                return true;
+
+            string key = caller?.GetType().FullName + "|" + message + "|" + exception.GetType().FullName + "|" + exception.TargetSite + "|" + exception.Message;
+            DateTime now = DateTime.Now;
+
+            lock (repeatedExceptions)
+            {
+                RepeatedException repeated;
+                if (repeatedExceptions.TryGetValue(key, out repeated) && now - repeated.LastLogged < repeatedExceptionInterval)
+                {
+                    repeated.Repeats++;
+                    return false;
+                }
+
+                if (repeated != null)
+                {
+                    repeats = repeated.Repeats;
+                }
+
+                // Not letting it grow forever, e.g. with messages that include a changing value.
+                if (repeatedExceptions.Count > 1000)
+                {
+                    foreach (string old in repeatedExceptions.Where(kvp => now - kvp.Value.LastLogged >= repeatedExceptionInterval).Select(kvp => kvp.Key).ToArray())
+                    {
+                        repeatedExceptions.Remove(old);
+                    }
+                }
+
+                repeatedExceptions[key] = new RepeatedException() { LastLogged = now };
+            }
+            return true;
+        }
+
+        private static string RepeatsText(int repeats)
+        {
+            if (repeats == 0)
+                return "";
+
+            return "(" + repeats + " more times since this was last logged) ";
         }
 
         public void FlushRecentHistory(Action<string> logEvents)
@@ -437,7 +534,7 @@ namespace Tools
 
         public string Version { get; private set; }
 
-        public LogItem(string logName, object caller, string message, object target, LogType type, Version version)
+        public LogItem(string logName, object caller, string message, object target, LogType type, string version)
         {
             LogName = logName;
             DateTime = DateTime.Now;
@@ -454,7 +551,7 @@ namespace Tools
 
             Message = message;
             Type = type;
-            Version = version.ToString();
+            Version = version;
         }
 
         public override string ToString()
@@ -481,13 +578,13 @@ namespace Tools
     public class CrashLogger
     {
         private FileInfo file;
-        private Version logVersion;
+        private string logVersion;
 
         public CrashLogger(DirectoryInfo logDir)
         {
             file = new FileInfo(Path.Combine(logDir.FullName, "Crash.log"));
 
-            logVersion = Assembly.GetEntryAssembly().GetName().Version;
+            logVersion = AppVersion.Text;
         }
 
         public void Log(Exception ex)

@@ -245,8 +245,9 @@ namespace RaceLib.Format
                     }
                 }
 
-                Race biggest = bracketRaces.OrderBy(br => br.PilotCount).Last();
-                Race smallest = bracketRaces.OrderBy(br => br.PilotCount).First();
+                // None when the bracket needs no more heats.
+                Race biggest = bracketRaces.OrderBy(br => br.PilotCount).LastOrDefault();
+                Race smallest = bracketRaces.OrderBy(br => br.PilotCount).FirstOrDefault();
 
                 // Even out the numbers of pilots. This takes priority over better matches
                 while (biggest != null && smallest != null && (biggest.PilotCount - smallest.PilotCount > 1))

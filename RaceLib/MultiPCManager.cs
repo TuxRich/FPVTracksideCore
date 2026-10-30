@@ -397,10 +397,22 @@ namespace RaceLib
                 json = JsonConvert.SerializeObject(status, Formatting.Indented);
             }
 
-            // Write then rename, so the other PCs never read half a file.
+            // Write then rename, so the other PCs never read half a file. Windows refuses the rename while anything has
+            // the file open, which another PC reading it or a virus scanner does for a moment, so it's tried again.
             string temp = Path.ChangeExtension(statusFile.FullName, ".tmp");
             File.WriteAllText(temp, json);
-            File.Move(temp, statusFile.FullName, true);
+            for (int attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    File.Move(temp, statusFile.FullName, true);
+                    return;
+                }
+                catch (Exception e) when ((e is IOException || e is UnauthorizedAccessException) && attempt < 10)
+                {
+                    Thread.Sleep(50);
+                }
+            }
         }
 
         private void ReadPeers()

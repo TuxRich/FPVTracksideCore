@@ -64,7 +64,15 @@ namespace ImageServer
         {
             while (State == States.Running)
             {
-                OnFrame(0, 0);
+                // What handles the frame shouldn't be able to end this thread, which would crash the app.
+                try
+                {
+                    OnFrame(0, 0);
+                }
+                catch (Exception e)
+                {
+                    Tools.Logger.VideoLog.LogException(this, e);
+                }
                 Thread.Sleep(Interval);
             }
         }

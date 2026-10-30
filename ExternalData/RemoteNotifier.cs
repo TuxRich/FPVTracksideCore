@@ -158,10 +158,18 @@ namespace ExternalData
             if (ticksSinceSend < TimeSpan.TicksPerSecond)
                 return;
 
-            RaceLib.Race race = eventManager.RaceManager.CurrentRace;
-            if (race != null)
+            // A timer callback, where an exception would crash the app, and the race can be changing as it's read.
+            try
             {
-                SendPilotRaceState(race);
+                RaceLib.Race race = eventManager.RaceManager.CurrentRace;
+                if (race != null)
+                {
+                    SendPilotRaceState(race);
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.HTTP.LogException(this, e);
             }
         }
 

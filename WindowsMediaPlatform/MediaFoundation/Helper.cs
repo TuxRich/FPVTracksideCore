@@ -54,6 +54,64 @@ namespace WindowsMediaPlatform.MediaFoundation
             }
         }
 
+        // The H.264 parameter sets the sink writer's encoder is using, null until it's encoded its first frames.
+        public static byte[] GetSinkWriterSequenceHeader(IMFSinkWriter writer, int streamIndex)
+        {
+            IMFSinkWriterEx writerEx = writer as IMFSinkWriterEx;
+            if (writerEx == null)
+                return null;
+
+            for (int i = 0; ; i++)
+            {
+                IMFTransform transform;
+                Guid category;
+                HResult hr = writerEx.GetTransformForStream(streamIndex, i, out category, out transform);
+                if (Failed(hr))
+                    return null;
+
+                try
+                {
+                    if (category == MFTransformCategory.MFT_CATEGORY_VIDEO_ENCODER)
+                    {
+                        IMFMediaType output;
+                        if (Failed(transform.GetOutputCurrentType(0, out output)))
+                            return null;
+
+                        return GetSequenceHeader(output);
+                    }
+                }
+                finally
+                {
+                    SafeRelease(transform);
+                }
+            }
+        }
+
+        // Releases the type.
+        public static byte[] GetSequenceHeader(IMFMediaType type)
+        {
+            if (type == null)
+                return null;
+
+            try
+            {
+                int size;
+                if (Failed(type.GetBlobSize(MFAttributesClsid.MF_MT_MPEG_SEQUENCE_HEADER, out size)) || size <= 0)
+                    return null;
+
+                byte[] blob = new byte[size];
+                int got;
+                if (Failed(type.GetBlob(MFAttributesClsid.MF_MT_MPEG_SEQUENCE_HEADER, blob, size, out got)))
+                    return null;
+
+                return blob;
+            }
+            finally
+            {
+                SafeRelease(type);
+            }
+        }
+
 
         public static FrameSource.Directions GetDirection(Guid subtype)
         {

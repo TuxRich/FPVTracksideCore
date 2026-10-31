@@ -38,6 +38,10 @@ namespace WindowsMediaPlatform.MediaFoundation
         private readonly List<FrameTime> frameTimes = new List<FrameTime>();
         private readonly VideoConfig videoConfig;
 
+        // The MP4 only gets the H.264 parameter sets when it's finalised, so they're saved alongside it as soon as the
+        // encoder has them, for repairing it if it never is (see Mp4Repair).
+        private bool parameterSetsSaved;
+
         public bool Recording { get; private set; }
         public string Filename { get; private set; }
         public bool RecordNextFrameTime { get; set; }
@@ -485,6 +489,8 @@ namespace WindowsMediaPlatform.MediaFoundation
                 hr = writer.WriteSample(sink_stream, sample);
                 MFError.ThrowExceptionForHR(hr);
 
+                SaveParameterSets();
+
                 if (flushing && sampleTime >= recordingTargetLength)
                 {
                     Logger.VideoLog.LogCall(this, "Final Length " + sampleTime);
@@ -496,6 +502,38 @@ namespace WindowsMediaPlatform.MediaFoundation
                     flushing = false;
                     Task.Run(() => FlushFinalize());
                 }
+            }
+        }
+
+        private void SaveParameterSets()
+        {
+            // The encoder has them after its first few frames, but not tried forever in case it never does. Not
+            // needed when passing through H.264, which has them in the stream.
+            if (parameterSetsSaved || receivedFrameCount % 5 != 0 || receivedFrameCount > 3000)
+                return;
+
+            try
+            {
+                byte[] sequenceHeader;
+                if (encoder != null)
+                {
+                    sequenceHeader = MFHelper.GetSequenceHeader(encoder.GetOutputCurrentType());
+                }
+                else
+                {
+                    sequenceHeader = MFHelper.GetSinkWriterSequenceHeader(writer, sink_stream);
+                }
+
+                if (sequenceHeader == null)
+                    return;
+
+                parameterSetsSaved = true;
+                File.WriteAllBytes(Mp4Repair.GetParameterSetsFilename(Filename), sequenceHeader);
+            }
+            catch (Exception e)
+            {
+                parameterSetsSaved = true;
+                Logger.VideoLog.LogException(this, e);
             }
         }
 
@@ -560,6 +598,12 @@ namespace WindowsMediaPlatform.MediaFoundation
 
             if (File.Exists(Filename))
                 File.Delete(Filename);
+
+            // Not left from a recording this replaces.
+            parameterSetsSaved = false;
+            string parameterSets = Mp4Repair.GetParameterSetsFilename(Filename);
+            if (File.Exists(parameterSets))
+                File.Delete(parameterSets);
         }
 
         private HResult CreateSinkWriter(out IMFSinkWriter sinkWriter)

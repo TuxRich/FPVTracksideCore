@@ -802,6 +802,9 @@ Video recording can be enabled in general settings. Quick warning though it uses
 Each race will be recorded into a video file in the Videos directory. After the race has ended you’ll have the option to open the Replay tab. The tab has the video feeds of all pilots with a playback tracking bar and controls along the bottom.
 
 
+If FPVTrackside is closed or crashes while it's recording, the video file isn't finished and can't be played as it is. It's repaired the first time its replay is opened, which can take a few seconds for a long recording. The repaired video lines up with the race as closely as the recording info allows, usually to within a fraction of a second.
+
+
 On the tracking bar are flags marking the start / end of the race and arrows marking each pilot's lap in their respective channel colour.
 
 

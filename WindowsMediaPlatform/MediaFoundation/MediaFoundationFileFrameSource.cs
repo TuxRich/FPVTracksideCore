@@ -394,6 +394,10 @@ namespace WindowsMediaPlatform.MediaFoundation
 
             if (source == null)
             {
+                // A recording that was never finished, e.g. because the app was closed while recording, can't be
+                // played until it's repaired.
+                Mp4Repair.RepairIfUnfinished(Path.FullName, FrameTimes);
+
                 CreateMediaSource(Path.FullName);
                 NotifyReceivedFrame();
             }

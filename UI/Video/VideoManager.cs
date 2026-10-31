@@ -19,6 +19,9 @@ namespace UI.Video
         private List<FrameSource> frameSources;
         public IEnumerable<FrameSource> FrameSources { get { return frameSources; } }
 
+        // How often the recording info's written while recording.
+        private static readonly TimeSpan videoInfoWriteInterval = TimeSpan.FromSeconds(30);
+
         public int ConnectedCount
         {
             get
@@ -737,6 +740,12 @@ namespace UI.Video
                         {
                             xmlconfig.Delete();
                         }
+
+                        FileInfo parameterSets = new FileInfo(Mp4Repair.GetParameterSetsFilename(file.FullName));
+                        if (parameterSets.Exists)
+                        {
+                            parameterSets.Delete();
+                        }
                     }
                 }
             }
@@ -795,6 +804,7 @@ namespace UI.Video
             bool someFinalising = false;
 
             List<FrameSource> needsVideoInfoWrite = new List<FrameSource>();
+            DateTime nextVideoInfoWrite = DateTime.Now + videoInfoWriteInterval;
             while (runWorker)
             {
                 try
@@ -845,6 +855,20 @@ namespace UI.Video
                                 source.RecordNextFrameTime = true;
                             }
 
+                            // While recording too, so a recording that's never finished, e.g. because the app was
+                            // closed, still has its frame times when it's repaired (see Mp4Repair).
+                            if (DateTime.Now >= nextVideoInfoWrite)
+                            {
+                                nextVideoInfoWrite = DateTime.Now + videoInfoWriteInterval;
+                                foreach (ICaptureFrameSource source in recording)
+                                {
+                                    if (source.Recording && !needsVideoInfoWrite.Contains((FrameSource)source))
+                                    {
+                                        needsVideoInfoWrite.Add((FrameSource)source);
+                                    }
+                                }
+                            }
+
                             if (!recording.Any())
                             {
                                 ICaptureFrameSource[] stopRecording;
@@ -886,7 +910,12 @@ namespace UI.Video
                                     // next to the video file.
                                     FileInfo videoFile = new FileInfo(IOTools.ResolveFromWorkingDirectory(vi.FilePath));
                                     FileInfo recordingInfo = GetRecordingInfoFileName(videoFile);
-                                    IOTools.Write(recordingInfo.Directory.FullName, recordingInfo.Name, vi);
+
+                                    // Written alongside then swapped in, so it's never left half written, which
+                                    // would lose the recording from the replays.
+                                    string written = Path.ChangeExtension(recordingInfo.FullName, ".tmp.xml");
+                                    IOTools.Write(recordingInfo.Directory.FullName, Path.GetFileName(written), vi);
+                                    File.Move(written, recordingInfo.FullName, true);
                                     needsVideoInfoWrite.Remove((FrameSource)source);
                                 }
                             }

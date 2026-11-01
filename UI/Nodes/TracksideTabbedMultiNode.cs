@@ -26,6 +26,7 @@ namespace UI.Nodes
         public bool IsOnLapCount { get { return LapCountSummaryNode == Showing; } }
         public bool IsOnLapRecords { get { return LapRecordsSummaryNode == Showing; } }
         public bool IsOnPoints { get { return PointsSummaryNode == Showing; } }
+        public bool IsOnFinalResults { get { return FinalResultsNode == Showing; } }
         public bool IsOnPatreons { get { return patreonsNode == Showing; } }
         public bool IsOnPhotoBooth { get { return PhotoBooth == Showing; } }
         public bool IsOnRSSI { get { return rssiNode == Showing; } }
@@ -41,6 +42,7 @@ namespace UI.Nodes
         public LapRecordsSummaryNode LapRecordsSummaryNode { get; private set; }
         public PointsSummaryNode PointsSummaryNode { get; private set; }
         public LapCountSummaryNode LapCountSummaryNode { get; private set; }
+        public FinalResultsNode FinalResultsNode { get; private set; }
 
         private RSSIAnalyserNode rssiNode;
 
@@ -72,6 +74,7 @@ namespace UI.Nodes
             PointsSummaryNode = new PointsSummaryNode(eventManager);
             LapCountSummaryNode = new LapCountSummaryNode(eventManager);
             LapRecordsSummaryNode = new LapRecordsSummaryNode(eventManager);
+            FinalResultsNode = new FinalResultsNode(eventManager);
             pilotChanelList = new PilotChanelList(eventManager);
             PhotoBooth = new PhotoBoothNode(videoManager, eventManager, soundManager);
 
@@ -114,6 +117,7 @@ namespace UI.Nodes
             AddTab("Lap Records", LapRecordsSummaryNode, ShowTopLaps);
             AddTab("Lap Count", LapCountSummaryNode, ShowLaps);
             AddTab("Points", PointsSummaryNode, ShowPoints);
+            AddTab("Final Results", FinalResultsNode, ShowFinalResults);
             TextButtonNode channelListButton = AddTab("Channel List", pilotChanelList, ShowPilotChannelList);
             rssiButton = AddTab("RSSI Analyser", rssiNode, ShowAnalyser);
             PhotoBoothButton = AddTab("Photo Booth", PhotoBooth, ShowPhotoBooth);
@@ -264,6 +268,12 @@ namespace UI.Nodes
             LapCountSummaryNode.OrderByLast();
             LapCountSummaryNode.Refresh();
             Show(LapCountSummaryNode);
+        }
+
+        public void ShowFinalResults(MouseInputEvent mie)
+        {
+            FinalResultsNode.Refresh();
+            Show(FinalResultsNode);
         }
 
         public void ShowRounds(MouseInputEvent mie)

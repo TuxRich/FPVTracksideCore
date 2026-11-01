@@ -275,6 +275,16 @@ namespace RaceLib
             return false;
         }
 
+        // Final Results pins are saved with the event, which belongs to the PC running it.
+        public bool CanChangeFinalResults()
+        {
+            if (!IsReviewPC)
+                return true;
+
+            Message("This PC opened the event to review races, so pilots can only be pinned in Final Results on the PC running the event.");
+            return false;
+        }
+
         public IEnumerable<MultiPCStatus> GetPeers()
         {
             lock (peers)

@@ -100,6 +100,8 @@ namespace DB.JSON
 
         public bool MultiPCReview { get; set; }
 
+        public FinalResultPin[] FinalResultPins { get; set; }
+
         public Event()
         {
         }

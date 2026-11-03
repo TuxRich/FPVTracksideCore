@@ -1,6 +1,6 @@
 # BIRD build: differences from upstream
 
-This branch (`server-client`, **2.79.1.925-BIRD**, commit `0a94761e`) compared with upstream master ([uewepuep/FPVTracksideCore](https://github.com/uewepuep/FPVTracksideCore), **2.79.1.919**, commit `88f4a847`), on 3 November 2026. The two split after upstream merged pull request #83 (lap editor, `838558e2`). Both are version 2.79.1. The build number counts commits since then, plus an offset (914 here, 915 upstream).
+This branch (`server-client`, **2.79.1.938-BIRD**, commit `a1765987`) compared with upstream master ([uewepuep/FPVTracksideCore](https://github.com/uewepuep/FPVTracksideCore), **2.79.1.919**, commit `88f4a847`), on 3 November 2026. The two split after upstream merged pull request #83 (lap editor, `838558e2`). Both are version 2.79.1. The build number counts commits since then, plus an offset (915 on both). Upstream's commits up to `88f4a847` are all here, except the ones listed under *Only in upstream*.
 
 ## Only in this version
 
@@ -44,18 +44,8 @@ This branch (`server-client`, **2.79.1.925-BIRD**, commit `0a94761e`) compared w
 - Seeder, formerly Brackets: a bracket engine and web app, with a Node.js build.
 - Stages as a status icon instead of a tab.
 - All result types in one Results tab.
-- More shortcut keys, and Shift+Tab cycling backwards.
-- Change pilot.
-- Next Race showing the next race's number.
 - Upstream's own auto-runner time display (this version has its own).
-- ArUco: marker-count waveform for marshalling, correction of laps from a flickering marker, and minimum marker size taken from the marker-size setting.
-- The big translation update.
 - Empty round and stage work.
-- *Optimisations, especially Skia*: only its Drawer queue fix was taken.
-
-**New since the last sync on 1 November, not looked at yet**
-- `cf8788e4` Fix RotorHazard marshal sync and race reset handling.
-- `88f4a847` Build number bump.
 
 ## Taken from upstream with changes
 
@@ -63,4 +53,8 @@ This branch (`server-client`, **2.79.1.925-BIRD**, commit `0a94761e`) compared w
 - *bug fixes + empty stage* (`29c40c56`): the sheet pilot-name fix and RotorHazard lean mode only.
 - *fix for all rounds in one column* (`173b96b5`): the sheet part only.
 - *fixes for sheets!* (`ef3aa862`), *Bug fixes from logs* (`7b936d05`) and the seek clamp (`c9f388b2`): adapted to this version's code.
+- *More shortcut keys* (`b9a6d536`): the tab shortcuts go to this version's separate result tabs, and on a review PC the ones for tabs it hides do nothing.
+- *Next Race* number (`5960fd61`): the Next button stays hidden on a review PC.
+- ArUco marshalling (`7620c8ce`): its marshal editor keeps this version's sector times.
+- *Big Translation update* (`098febfc`): without the strings for the upstream screens left out (empty round options, Seeder).
 - Upstream's `8d355658` (user settings overwrite) and `c2ce8580` (PR 86) are already here in another form.

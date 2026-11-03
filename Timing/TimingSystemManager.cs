@@ -584,15 +584,26 @@ namespace Timing
             }
         }
 
+        // Read on every frame the RSSI Analyser is drawn, so a timer that fails mustn't stop the others' levels. One that
+        // isn't connected has none: its zeros would cover a connected timer's on the same channel.
         public IEnumerable<RSSI> GetRSSI()
         {
+            List<RSSI> rssis = new List<RSSI>();
             foreach (ITimingSystemWithRSSI timingSystem in TimingSystems.OfType<ITimingSystemWithRSSI>())
             {
-                foreach (RSSI rssi in timingSystem.GetRSSI())
+                try
                 {
-                    yield return rssi;
+                    if (timingSystem.Connected)
+                    {
+                        rssis.AddRange(timingSystem.GetRSSI());
+                    }
+                }
+                catch (Exception e)
+                {
+                    Logger.TimingLog.LogException(this, e);
                 }
             }
+            return rssis;
         }
     }
 }

@@ -159,10 +159,10 @@ namespace Composition.Layers
                 }
                 catch (Exception e)
                 {
-                    drawer?.Dispose();
+                    // The drawer stays. Replacing it lost the render targets' queued redraws, and the replacement owned
+                    // a new texture cache, which the next replacement disposed with every texture the nodes had from it.
                     Logger.UI.LogException(this, e);
-                    Logger.UI.Log(this, "Creating new Drawing object", drawer);
-                    drawer = new Drawer(GraphicsDevice);
+                    drawer?.Recover();
                 }
             }
             DebugTimer.DebugEndTime("CompLayer.Draw");

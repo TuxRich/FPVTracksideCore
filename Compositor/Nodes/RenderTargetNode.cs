@@ -258,8 +258,11 @@ namespace Composition.Nodes
                             hoverNode.RenderTargetDraw(id, parentAlpha);
                         }
                     }
-                    catch
+                    catch (Exception e)
                     {
+                        // Drawn again from scratch. Logged, as it's otherwise just missing from the screen.
+                        Logger.UI.LogException(this, e);
+
                         if (renderTarget != null)
                         {
                             renderTarget.Dispose();
@@ -381,8 +384,11 @@ namespace Composition.Nodes
                         hasContent = true;
                     }
                 }
-                catch
+                catch (Exception e)
                 {
+                    // Drawn again from scratch. Logged, as it's otherwise just missing from the screen.
+                    Logger.UI.LogException(this, e);
+
                     if (renderTarget != null)
                     {
                         renderTarget.Dispose();
@@ -391,6 +397,8 @@ namespace Composition.Nodes
 
                     if (drawer != null)
                     {
+                        // Ending the frame that failed first, which Dispose would wait 5 s for.
+                        drawer.Recover();
                         drawer.Dispose();
                         drawer = null;
                     }

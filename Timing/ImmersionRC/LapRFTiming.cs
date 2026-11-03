@@ -285,6 +285,10 @@ namespace Timing.ImmersionRC
 
         public bool EndDetection(EndDetectionType type)
         {
+            // laprf is made on connecting, so it's null until the first attempt.
+            if (laprf == null)
+                return false;
+
             laprf.prepare_sendable_packet(LapRF.LapRFProtocol.laprf_type_of_record.LAPRF_TOR_STATE_CONTROL);
             laprf.append_field_of_record_u8(0x20, 0);                // 0 = stop race
             if (!Send(laprf.finalize_sendable_packet()))
@@ -296,6 +300,9 @@ namespace Timing.ImmersionRC
 
         public bool StartDetection(ref DateTime time, StartMetaData startMetaData)
         {
+            if (laprf == null)
+                return false;
+
             if (!SetMinLapTime(settings.MinimumTriggerTime))
             {
                 Logger.TimingLog.Log(this, "Failed Set Min Lap Time");
@@ -442,6 +449,9 @@ namespace Timing.ImmersionRC
                 return true;
             }
 
+            if (laprf == null)
+                return false;
+
             IEnumerator<ListeningFrequency> enumerator = newFrequencies.GetEnumerator();
             idToFreq.Clear();
 
@@ -495,6 +505,9 @@ namespace Timing.ImmersionRC
 
         public IEnumerable<RSSI> GetRSSI()
         {
+            if (laprf == null)
+                yield break;
+
             for (int index = 0; index < 8; index++)
             {
                 int pilotID = index + 1;

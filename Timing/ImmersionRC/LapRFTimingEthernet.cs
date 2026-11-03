@@ -33,9 +33,10 @@ namespace Timing.ImmersionRC
 
                 sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
-                //asynchronous connect request
-                IAsyncResult result = sock.BeginConnect(IPs[0], LapRFSettingsEthernet.Port, null, null);
-                if (result.AsyncWaitHandle.WaitOne(1000))
+                // Given a second. One still going then is dropped, with the socket closed under it, and its failure is
+                // observed, or .NET logs an unobserved task exception for every attempt.
+                Task connecting = sock.ConnectAsync(IPs[0], LapRFSettingsEthernet.Port);
+                if (connecting.Wait(1000))
                 {
                     if (sock != null && sock.Connected)
                     {
@@ -46,6 +47,10 @@ namespace Timing.ImmersionRC
                         lastData = DateTime.Now;
                         return true;
                     }
+                }
+                else
+                {
+                    connecting.ContinueWith(t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
                 }
             }
             catch

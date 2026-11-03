@@ -342,6 +342,32 @@ namespace Composition
             }
         }
 
+        // After a frame that failed part way through: the next one starts afresh. The texture cache, which the nodes'
+        // textures belong to, and the pre-processing queued (render targets' redraws) are kept.
+        public void Recover()
+        {
+            SpriteBatch failed = SpriteBatch;
+            SpriteBatch = new SpriteBatch(GraphicsDevice);
+
+            try
+            {
+                failed?.Dispose();
+            }
+            catch (Exception e)
+            {
+                Logger.UI.LogException(this, e);
+            }
+
+            hasBegun = false;
+            clipRectangles.Clear();
+
+            // A ListNode moves it while drawing its children, and puts it back after.
+            Offset = Point.Zero;
+
+            // Dispose waits for the end of a frame that started.
+            autoresetevent?.Set();
+        }
+
         public void CleanUp(IDisposable toClean)
         {
             if (toClean == null)

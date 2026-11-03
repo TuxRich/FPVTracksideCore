@@ -10,6 +10,7 @@ using Timing.Aruco;
 using Timing.Chorus;
 using Timing.ELRS;
 using Timing.ImmersionRC;
+using Timing.RaceTimer;
 using Timing.RotorHazard;
 using Timing.Velocidrone;
 using Tools;
@@ -232,6 +233,9 @@ namespace Timing
 
             else if (settings is ArucoTimingSettings)
                 timingSystem = new ArucoTimingSystem();
+
+            else if (settings is RaceTimerSettings)
+                timingSystem = new RaceTimerTimingSystem();
 
             if (timingSystem != null)
             {

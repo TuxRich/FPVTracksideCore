@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using Timing;
 using Timing.ELRS;
 using Timing.ImmersionRC;
+using Timing.RaceTimer;
 using Timing.RotorHazard;
 using Timing.Velocidrone;
 using Tools;
@@ -45,6 +46,10 @@ namespace UI.Nodes
                     if (timingSystemSetting is VelocidroneSettings)
                     {
                         yield return ((VelocidroneSettings)timingSystemSetting).HostName;
+                    }
+                    if (timingSystemSetting is RaceTimerSettings)
+                    {
+                        yield return ((RaceTimerSettings)timingSystemSetting).HostName;
                     }
                 }
             }
@@ -133,6 +138,7 @@ namespace UI.Nodes
                 || settings is LapRFSettingsEthernet
                 || settings is VelocidroneSettings
                 || settings is Timing.Chorus.ChorusSettings
+                || settings is RaceTimerSettings
                 || settings is DummySettings;
         }
 
@@ -265,6 +271,7 @@ namespace UI.Nodes
             mouseMenu.AddItem("LapRF 8-way", () => { AddNew(new Timing.ImmersionRC.LapRFSettingsEthernet()); });
             mouseMenu.AddItem("LapRF Puck", () => { AddNew(new Timing.ImmersionRC.LapRFSettingsUSB()); });
             mouseMenu.AddItem("RotorHazard 4.0+", () => { AddNew(new Timing.RotorHazard.RotorHazardSettings()); });
+            mouseMenu.AddItem("racetimer gate", () => { AddNew(new RaceTimerSettings()); });
             mouseMenu.AddItem("Velocidrone", () => { AddNew(new VelocidroneSettings()); });
             mouseMenu.AddItem("Chorus32", () => { AddNew(new Timing.Chorus.ChorusSettings()); });
             mouseMenu.AddItem("ELRS Backpack (Race Control)", () => { AddNew(new ELRSSettings()); });

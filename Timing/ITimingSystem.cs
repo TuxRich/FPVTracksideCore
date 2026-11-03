@@ -28,6 +28,7 @@ namespace Timing
         Velocidrone,
         Manual,
         Other,
+        RaceTimer,
     }
 
     public class ListeningFrequency
@@ -181,6 +182,7 @@ namespace Timing
     [XmlInclude(typeof(ChorusSettings))]
     [XmlInclude(typeof(Velocidrone.VelocidroneSettings))]
     [XmlInclude(typeof(Timing.Aruco.ArucoTimingSettings))]
+    [XmlInclude(typeof(Timing.RaceTimer.RaceTimerSettings))]
     public class TimingSystemSettings
     {
         [Category("System Settings")]

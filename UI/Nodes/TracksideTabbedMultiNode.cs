@@ -167,9 +167,11 @@ namespace UI.Nodes
         }
 
 
+        // Multi-PC review: the analyser starts and stops detection, which on a shared timer (RotorHazard, a racetimer gate)
+        // would start or stop the race the PC running the event is timing.
         private void UpdateRSSIVisible()
         {
-            rssiButton.Visible = eventManager.RaceManager.TimingSystemManager.HasSpectrumAnalyser;
+            rssiButton.Visible = eventManager.RaceManager.TimingSystemManager.HasSpectrumAnalyser && !IsReviewPC;
         }
 
         private void UpdateReplayButton(Race race)

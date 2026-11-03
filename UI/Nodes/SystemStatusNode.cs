@@ -12,6 +12,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Timing;
+using Timing.RaceTimer;
 using Timing.RotorHazard;
 using Tools;
 using UI.Video;
@@ -291,6 +292,17 @@ namespace UI.Nodes
                 MouseMenu mm = new MouseMenu(this);
 
                 mm.AddItem("RotorHazard (Web)", () => DataTools.StartBrowser("http://" + settings.HostName + ":" + settings.Port));
+
+                mm.Show(this);
+                return true;
+            }
+
+            // The gate's thresholds and receivers are set on its page.
+            if (mouseInputEvent.ButtonState == ButtonStates.Released && TimingSystem is RaceTimerTimingSystem && TimingSystem.Settings is RaceTimerSettings gateSettings)
+            {
+                MouseMenu mm = new MouseMenu(this);
+
+                mm.AddItem("racetimer gate (Web)", () => DataTools.StartBrowser(gateSettings.GetUri("http", "/").ToString()));
 
                 mm.Show(this);
                 return true;

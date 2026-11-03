@@ -1,5 +1,6 @@
 ﻿using Composition;
 using Composition.Input;
+using Composition.Layers;
 using Composition.Nodes;
 using ExternalData;
 using ImageServer;
@@ -27,12 +28,22 @@ namespace UI.Nodes
         public OBSStatusNode OBS { get; private set; }
         public SubTitleStatusNode Subtitles { get; private set; }
 
+        // Sets them up again as last given, after a timer's switched on or off.
+        private Action refresh;
+
         public SystemStatusNode()
         {
         }
 
+        public void Refresh()
+        {
+            refresh?.Invoke();
+        }
+
         public void SetupStatuses(TimingSystemManager timingSystemManager, VideoManager videoManager, SoundManager soundManager, OBSRemoteControlManager oBSRemoteControlManager, SubtitleNode subtitleNode, MultiPCManager multiPC = null)
         {
+            refresh = () => SetupStatuses(timingSystemManager, videoManager, soundManager, oBSRemoteControlManager, subtitleNode, multiPC);
+
             ClearDisposeChildren();
 
             MuteTTS = new MuteStatusNode(soundManager, MuteStatusNode.MuteStatusTypes.TTS);
@@ -47,7 +58,8 @@ namespace UI.Nodes
             Subtitles = new SubTitleStatusNode(subtitleNode);
             AddChild(Subtitles);
 
-            foreach (ITimingSystem timingSystem in timingSystemManager.AllSystems)
+            // The ones switched off too, to switch them on again from their menu.
+            foreach (ITimingSystem timingSystem in timingSystemManager.AllSystems.Concat(timingSystemManager.DisabledSystems))
             {
                 TimingSystemStatusNode tsn = new TimingSystemStatusNode(timingSystemManager, timingSystem);
                 AddChild(tsn);
@@ -239,6 +251,16 @@ namespace UI.Nodes
         {
             base.StatusUpdate();
 
+            // Switched off: dimmed, with nothing to report.
+            bool enabled = TimingSystem?.Settings == null || TimingSystem.Settings.Enabled;
+            Alpha = enabled ? 1 : 0.4f;
+            if (!enabled)
+            {
+                Name = TimingSystem.Name;
+                SetStatus("Off", true);
+                return;
+            }
+
             if (TimingSystem != null)
             {
                 if (TimingSystem is IRaceControlTimingSystem)
@@ -287,28 +309,51 @@ namespace UI.Nodes
         // No separate login needed here, just links out to a browser.
         public override bool OnMouseInput(MouseInputEvent mouseInputEvent)
         {
-            if (mouseInputEvent.ButtonState == ButtonStates.Released && TimingSystem is RotorHazardTimingSystem && TimingSystem.Settings is RotorHazardSettings settings)
+            bool rightClick = mouseInputEvent.Button == MouseButtons.Right;
+            bool hasPage = TimingSystem is RotorHazardTimingSystem || TimingSystem is RaceTimerTimingSystem;
+
+            if (mouseInputEvent.ButtonState == ButtonStates.Released && TimingSystem?.Settings != null && (rightClick || hasPage))
             {
                 MouseMenu mm = new MouseMenu(this);
 
-                mm.AddItem("RotorHazard (Web)", () => DataTools.StartBrowser("http://" + settings.HostName + ":" + settings.Port));
+                if (TimingSystem is RotorHazardTimingSystem && TimingSystem.Settings is RotorHazardSettings settings)
+                {
+                    mm.AddItem("RotorHazard (Web)", () => DataTools.StartBrowser("http://" + settings.HostName + ":" + settings.Port));
+                }
 
-                mm.Show(this);
-                return true;
-            }
+                // The gate's thresholds and receivers are set on its page.
+                if (TimingSystem is RaceTimerTimingSystem && TimingSystem.Settings is RaceTimerSettings gateSettings)
+                {
+                    mm.AddItem("racetimer gate (Web)", () => DataTools.StartBrowser(gateSettings.GetUri("http", "/").ToString()));
+                }
 
-            // The gate's thresholds and receivers are set on its page.
-            if (mouseInputEvent.ButtonState == ButtonStates.Released && TimingSystem is RaceTimerTimingSystem && TimingSystem.Settings is RaceTimerSettings gateSettings)
-            {
-                MouseMenu mm = new MouseMenu(this);
-
-                mm.AddItem("racetimer gate (Web)", () => DataTools.StartBrowser(gateSettings.GetUri("http", "/").ToString()));
+                // Off keeps its settings, for when it's wanted again.
+                if (rightClick)
+                {
+                    bool enabled = TimingSystem.Settings.Enabled;
+                    mm.AddItem(enabled ? "Disable timer" : "Enable timer", () => SetEnabled(!enabled));
+                }
 
                 mm.Show(this);
                 return true;
             }
 
             return base.OnMouseInput(mouseInputEvent);
+        }
+
+        private void SetEnabled(bool enabled)
+        {
+            if (TimingSystemManager.IsDetecting)
+            {
+                GetLayer<PopupLayer>()?.PopupMessage("Timers can't be switched on or off while they're detecting: during a race, or with the RSSI Analyser open.");
+                return;
+            }
+
+            if (TimingSystemManager.SetEnabled(TimingSystem, enabled))
+            {
+                // This node goes with the rest, made again for the timers as they are now.
+                (Parent as SystemStatusNode)?.Refresh();
+            }
         }
     }
 

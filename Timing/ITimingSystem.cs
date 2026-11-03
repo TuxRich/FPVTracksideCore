@@ -188,7 +188,17 @@ namespace Timing
         [Category("System Settings")]
         public TimingSystemRole Role { get; set; }
 
+        // Off: kept with its settings, but not connected or used, e.g. for an event that doesn't use it.
+        [Category("System Settings")]
+        public bool Enabled { get; set; }
+
         private const string timingSystemFilename = "TimingSystemSettings.xml";
+
+        public TimingSystemSettings()
+        {
+            // Settings saved before there was a switch have none, so stay on.
+            Enabled = true;
+        }
 
         public override string ToString()
         {

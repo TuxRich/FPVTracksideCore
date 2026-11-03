@@ -44,6 +44,11 @@ namespace Timing
         public ITimingSystem[] SplitSystems { get; private set; }
         public IRaceControlTimingSystem[] RaceControlSystems { get; private set; }
 
+        // Switched off in their settings: made, so they can be shown and switched on, but never connected or used.
+        public ITimingSystem[] DisabledSystems { get; private set; }
+
+        private Profile profile;
+
         public IEnumerable<ITimingSystem> TimingSystems
         {
             get
@@ -121,6 +126,7 @@ namespace Timing
             PrimeSystems = new ITimingSystem[0];
             SplitSystems = new ITimingSystem[0];
             RaceControlSystems = new IRaceControlTimingSystem[0];
+            DisabledSystems = new ITimingSystem[0];
             LastListeningFrequencies = new ListeningFrequency[0];
 
             InitialiseTimingSystems(profile);
@@ -131,13 +137,14 @@ namespace Timing
         {
             Logger.TimingLog.LogCall(this);
 
-            foreach (ITimingSystem timingSystem in AllSystems)
+            foreach (ITimingSystem timingSystem in AllSystems.Concat(DisabledSystems))
             {
                 timingSystem.Dispose();
             }
             PrimeSystems = new ITimingSystem[0];
             SplitSystems = new ITimingSystem[0];
             RaceControlSystems = new IRaceControlTimingSystem[0];
+            DisabledSystems = new ITimingSystem[0];
 
             HasSpectrumAnalyser = false;
         }
@@ -146,16 +153,20 @@ namespace Timing
         {
             Logger.TimingLog.LogCall(this);
 
-            if (AllSystems.Any())
+            if (AllSystems.Any() || DisabledSystems.Any())
             {
                 ClearTimingSystems();
             }
 
+            this.profile = profile;
             HasSpectrumAnalyser = false;
 
             TimingSystemsSettings = TimingSystemSettings.Read(profile);
 
-            ITimingSystem[] allSystems = CreateTimingSystems().ToArray();
+            ITimingSystem[] created = CreateTimingSystems().ToArray();
+            DisabledSystems = created.Where(r => !r.Settings.Enabled).ToArray();
+
+            ITimingSystem[] allSystems = created.Except(DisabledSystems).ToArray();
             RaceControlSystems = allSystems.OfType<IRaceControlTimingSystem>().ToArray();
             ITimingSystem[] timingSystems = allSystems.Except(RaceControlSystems.Cast<ITimingSystem>()).ToArray();
 
@@ -191,6 +202,21 @@ namespace Timing
             connector = null;
 
             OnInitialise?.Invoke();
+        }
+
+        // Switches a timer on or off, keeping its settings, then saves them and starts the timers again, as the timing
+        // settings do on OK. Not while detecting: that would leave a race without its timers.
+        public bool SetEnabled(ITimingSystem timingSystem, bool enabled)
+        {
+            if (detectionRunning || profile == null || timingSystem?.Settings == null || !TimingSystemsSettings.Contains(timingSystem.Settings))
+                return false;
+
+            Logger.TimingLog.LogCall(this, timingSystem, enabled);
+
+            timingSystem.Settings.Enabled = enabled;
+            TimingSystemSettings.Write(profile, TimingSystemsSettings);
+            InitialiseTimingSystems(profile);
+            return true;
         }
 
         private IEnumerable<ITimingSystem> CreateTimingSystems()

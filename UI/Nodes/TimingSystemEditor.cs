@@ -342,12 +342,18 @@ namespace UI.Nodes
         {
             string extraInfo = "";
 
-            int lapTimingSystemCount = Objects.Count(obj => !(obj is ELRSSettings));
+            // Those switched off aren't used, so they take no part in which is primary and the splits' order.
+            if (!item.Enabled)
+            {
+                return base.ItemToString(item) + " (Off)";
+            }
+
+            int lapTimingSystemCount = Objects.Count(obj => !(obj is ELRSSettings) && obj.Enabled);
             if (!(item is ELRSSettings) && lapTimingSystemCount > 1)
             {
                 if (item.Role == TimingSystemRole.Split)
                 {
-                    extraInfo = " (Split " + (Objects.Where(r => !(r is ELRSSettings) && r.Role == TimingSystemRole.Split).ToList().IndexOf(item) + 1) + ")";
+                    extraInfo = " (Split " + (Objects.Where(r => !(r is ELRSSettings) && r.Enabled && r.Role == TimingSystemRole.Split).ToList().IndexOf(item) + 1) + ")";
                 }
                 else
                 {
@@ -380,7 +386,7 @@ namespace UI.Nodes
             {
                 t.Role = TimingSystemRole.Split;
             }
-            else if (Objects.Any(obj => !(obj is ELRSSettings)))
+            else if (Objects.Any(obj => !(obj is ELRSSettings) && obj.Enabled))
             {
                 t.Role = TimingSystemRole.Split;
             }

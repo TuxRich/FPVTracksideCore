@@ -729,10 +729,23 @@ namespace UI
                     {
                         EventManager.RaceManager.SetRace(current);
                     }
-                    waiter.Set();
+
+                    // Disposed already if the wait below gave up.
+                    try
+                    {
+                        waiter.Set();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                    }
                 });
 
-                waiter.WaitOne();
+                // The callback comes from the video worker thread once every device has been opened. Not waited for
+                // forever: on the UI thread (after the video settings close) that would freeze the whole app.
+                if (!waiter.WaitOne(TimeSpan.FromSeconds(60)))
+                {
+                    Logger.VideoLog.Log(this, "Loading the video devices took more than 60 s. Carrying on without them.");
+                }
             }
 
             if (TabbedMultiNode.IsOnPhotoBooth)

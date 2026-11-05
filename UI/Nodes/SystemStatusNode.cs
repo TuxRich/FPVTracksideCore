@@ -247,6 +247,14 @@ namespace UI.Nodes
             }
         }
 
+        // These are made again whenever the timing, video or OBS settings change. Left subscribed, every disposed
+        // one would still be called on each detection.
+        public override void Dispose()
+        {
+            TimingSystemManager.OnDataReceived -= TimingSystemManager_OnDataReceived;
+            base.Dispose();
+        }
+
         public override void StatusUpdate()
         {
             base.StatusUpdate();
@@ -585,6 +593,12 @@ namespace UI.Nodes
             AddChild(cbn);
             icon.Dispose();
             icon = cbn;
+        }
+
+        public override void Dispose()
+        {
+            oBSRemoteControlManager.Activity -= OBSRemoteControlManager_Activity;
+            base.Dispose();
         }
 
         private void Cbn_ValueChanged(bool obj)

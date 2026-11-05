@@ -591,27 +591,41 @@ namespace UI.Video
         {
             DoOnWorkerThread(() =>
             {
-                IEnumerable<VideoConfig> toCreate = videoConfigs;
-                bool hasDuplicates = videoConfigs
-                    .Where(v => IsOrdinalMatchable(v))
-                    .GroupBy(v => v.DeviceName?.Trim(), StringComparer.OrdinalIgnoreCase)
-                    .Any(g => g.Count() > 1);
-                if (hasDuplicates)
-                {
-                    toCreate = AssignDuplicateDevices(videoConfigs);
-                }
-
                 List<FrameSource> list = new List<FrameSource>();
-                foreach (var videoConfig in toCreate)
+                try
                 {
-                    RemoveFrameSource(videoConfig);
-                    FrameSource fs = CreateFrameSource(videoConfig);
-                    list.Add(fs);
-                }
+                    IEnumerable<VideoConfig> toCreate = videoConfigs;
+                    bool hasDuplicates = videoConfigs
+                        .Where(v => IsOrdinalMatchable(v))
+                        .GroupBy(v => v.DeviceName?.Trim(), StringComparer.OrdinalIgnoreCase)
+                        .Any(g => g.Count() > 1);
+                    if (hasDuplicates)
+                    {
+                        toCreate = AssignDuplicateDevices(videoConfigs);
+                    }
 
-                if (frameSourcesDelegate != null)
+                    foreach (var videoConfig in toCreate)
+                    {
+                        // A source that can't be made mustn't stop the others being made.
+                        try
+                        {
+                            RemoveFrameSource(videoConfig);
+                            FrameSource fs = CreateFrameSource(videoConfig);
+                            list.Add(fs);
+                        }
+                        catch (Exception e)
+                        {
+                            Logger.VideoLog.LogException(this, e);
+                        }
+                    }
+                }
+                finally
                 {
-                    frameSourcesDelegate(list);
+                    // Always called: EventLayer.LoadVideo waits for it.
+                    if (frameSourcesDelegate != null)
+                    {
+                        frameSourcesDelegate(list);
+                    }
                 }
             });
         }
@@ -1043,15 +1057,20 @@ namespace UI.Video
                 needsDispose.Clear();
             }
 
+            // Each action on its own: one that fails mustn't stop the rest, or run again next time round. The list
+            // isn't held while they run, so another thread can queue the next one meanwhile.
+            Action[] actions;
             lock (todo)
+            {
+                actions = todo.ToArray();
+                todo.Clear();
+            }
+
+            foreach (var action in actions)
             {
                 try
                 {
-                    foreach (var action in todo)
-                    {
-                        action();
-                    }
-                    todo.Clear();
+                    action();
                 }
                 catch (Exception e)
                 {

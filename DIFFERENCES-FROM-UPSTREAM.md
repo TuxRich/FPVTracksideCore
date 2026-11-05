@@ -29,6 +29,7 @@ This branch (`server-client`, **2.79.1.938-BIRD**, commit `a1765987`) compared w
 - The auto runner shows the time left on its side button.
 - Startup is about twice as fast, because only the active theme is loaded.
 - A drawing error no longer freezes the screen for 5 s or leaves images and rounds blank.
+- Loading the video devices can't hang the app when one of them can't be opened, and one failed job on the video worker thread no longer blocks or repeats the others.
 - Stability fixes from event logs:
   - the RotorHazard status error storm is fixed;
   - speech recovers after audio device errors;

@@ -155,12 +155,67 @@ namespace UI
             ApplicationProfileSettings.Initialize(profile);
         }
 
+        // Why the profile loaded isn't the one chosen, shown once the UI is up.
+        private string profileMessage;
+
+        // A profile's event folder may be a network drive that isn't there, e.g. a review profile pointing at the race
+        // PC's share. LoadContent would then fail opening the database on it, and the app would close with an error.
+        private void CheckEventStorage()
+        {
+            Func<Profile, DirectoryInfo> storage = p => (p.Name == Profile.Name ? ApplicationProfileSettings.Instance : ApplicationProfileSettings.Peek(p)).EventStorageDirectory;
+            Func<DirectoryInfo, string> check = d => IOTools.IsAccessible(d, TimeSpan.FromSeconds(10), out string problem) ? null : problem;
+
+            Profile accessible = ChooseAccessibleProfile(Profile, Profile.GetProfiles(PlatformTools.WorkingDirectory), storage, check, out profileMessage);
+            if (!ReferenceEquals(accessible, Profile))
+            {
+                Profile = accessible;
+                InitializeProfileSettings(Profile);
+            }
+            else if (profileMessage != null)
+            {
+                // Only for this run: the setting itself isn't changed.
+                ApplicationProfileSettings.Instance.EventStorageLocationRelative = "events";
+            }
+        }
+
+        // The profile to load: the one chosen if its event folder can be used, or else the default profile or any
+        // other whose folder can be, with a message saying so. With none, the one chosen, for the caller to point at
+        // the local events folder. check gives why a folder can't be used, or null.
+        public static Profile ChooseAccessibleProfile(Profile chosen, IEnumerable<Profile> profiles, Func<Profile, DirectoryInfo> storage, Func<DirectoryInfo, string> check, out string message)
+        {
+            message = null;
+
+            DirectoryInfo chosenFolder = storage(chosen);
+            string problem = check(chosenFolder);
+            if (problem == null)
+                return chosen;
+
+            Logger.UI.Log(typeof(BaseGame), "Profile " + chosen.Name + "'s event folder " + chosenFolder.FullName + " can't be used: " + problem);
+            string reason = "The event folder of the profile '" + chosen.Name + "' can't be used:\n" + chosenFolder.FullName + "\n" + problem;
+
+            IEnumerable<Profile> others = profiles.Where(p => p.Name != chosen.Name)
+                                                  .OrderBy(p => p.Name == GeneralSettings.DefaultProfileName ? 0 : 1)
+                                                  .ThenBy(p => p.Name);
+            foreach (Profile other in others)
+            {
+                if (check(storage(other)) == null)
+                {
+                    message = reason + "\n\nThe profile '" + other.Name + "' has been loaded instead.";
+                    return other;
+                }
+            }
+
+            message = reason + "\n\nNo other profile's can be either, so for now its events are in the local events folder.";
+            return chosen;
+        }
+
         protected override void Initialize()
         {
             GeneralSettings.Initialise();
 
             Profile = new Profile(PlatformTools.WorkingDirectory, GeneralSettings.Instance.Profile);
             InitializeProfileSettings(Profile);
+            CheckEventStorage();
 
             // ShownDecimalPlaces is [NeedsRestart], so a single startup-time copy
             // into SpeechParameters is enough for every TTS call site.
@@ -260,6 +315,12 @@ namespace UI
             else
             {
                 ShowEventSelector();
+            }
+
+            if (profileMessage != null)
+            {
+                Popuper.PopupMessage(profileMessage);
+                profileMessage = null;
             }
         }
 

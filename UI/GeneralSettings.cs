@@ -18,9 +18,12 @@ namespace UI
         public string Profile { get; set; }
 
 
+        // The profile a new install gets, and the one loaded when the chosen profile's event folder can't be used.
+        public const string DefaultProfileName = "Profile 1";
+
         public GeneralSettings()
         {
-            Profile = "Profile 1";
+            Profile = DefaultProfileName;
         }
 
         protected const string filename = "GeneralSettings.xml";

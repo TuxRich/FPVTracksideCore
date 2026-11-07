@@ -31,6 +31,39 @@ namespace Tools
             }
         }
 
+        // Whether the directory can be used, made if it isn't there. Not waited on for ever: a network drive that's
+        // disconnected can take a minute to say so, and the app would seem to hang. problem says why not.
+        public static bool IsAccessible(DirectoryInfo directory, TimeSpan timeout, out string problem)
+        {
+            string failure = null;
+            Task<bool> check = Task.Run(() =>
+            {
+                try
+                {
+                    directory.Refresh();
+                    if (!directory.Exists)
+                    {
+                        directory.Create();
+                    }
+                    return true;
+                }
+                catch (Exception e)
+                {
+                    failure = e.Message;
+                    return false;
+                }
+            });
+
+            if (!check.Wait(timeout))
+            {
+                problem = "No answer from it in " + timeout.TotalSeconds + " s.";
+                return false;
+            }
+
+            problem = check.Result ? null : failure;
+            return check.Result;
+        }
+
         /// <summary>
         /// Resolves a relative path to an absolute path based on WorkingDirectory.
         /// Absolute paths are returned as-is. Falls back to the current directory, as before,

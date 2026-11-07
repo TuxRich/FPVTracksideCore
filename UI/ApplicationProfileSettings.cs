@@ -546,6 +546,20 @@ namespace UI
             }
         }
 
+        // The settings as saved, neither migrated nor written back: for looking at a profile that isn't being loaded.
+        public static ApplicationProfileSettings Peek(Profile profile)
+        {
+            try
+            {
+                return Tools.IOTools.Read<ApplicationProfileSettings>(profile, filename).FirstOrDefault() ?? new ApplicationProfileSettings();
+            }
+            catch (Exception ex)
+            {
+                Logger.UI.LogException(typeof(ApplicationProfileSettings), ex);
+                return new ApplicationProfileSettings();
+            }
+        }
+
         public static void Write()
         {
             Write(ProfileInstance, Instance);

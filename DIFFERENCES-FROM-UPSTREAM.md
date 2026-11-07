@@ -30,6 +30,7 @@ This branch (`server-client`, **2.79.1.938-BIRD**, commit `a1765987`) compared w
 - Startup is about twice as fast, because only the active theme is loaded.
 - A drawing error no longer freezes the screen for 5 s or leaves images and rounds blank.
 - Loading the video devices can't hang the app when one of them can't be opened, and one failed job on the video worker thread no longer blocks or repeats the others.
+- A profile whose event folder can't be reached (e.g. a review profile pointing at a share that's offline) no longer closes the app: the default profile is loaded instead, with a message saying why. Errors on the window's message loop are logged rather than lost.
 - Stability fixes from event logs:
   - the RotorHazard status error storm is fixed;
   - speech recovers after audio device errors;
